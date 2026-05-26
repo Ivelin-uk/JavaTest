@@ -3,35 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello World MVC</title>
+    <title>Users From MySQL</title>
     <style>
         body {
-            margin: 0;
+            margin: 0 auto;
+            max-width: 760px;
             min-height: 100vh;
-            display: grid;
-            place-items: center;
+            padding: 2rem 1rem;
             background: linear-gradient(145deg, #f4f6fb, #dfe8ff);
             font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
         }
 
         .card {
-            padding: 2.5rem 3rem;
+            padding: 2rem;
             border-radius: 1rem;
             background: #ffffff;
             box-shadow: 0 12px 30px rgba(24, 39, 75, 0.15);
-            text-align: center;
         }
 
         h1 {
-            margin: 0;
+            margin: 0 0 1rem;
             color: #1f2a44;
             letter-spacing: 0.03em;
+        }
+
+        ul {
+            margin: 0;
+            padding-left: 1.2rem;
+        }
+
+        li {
+            margin: 0.35rem 0;
+            color: #2d3b58;
+        }
+
+        .empty {
+            color: #4c5a75;
+            margin: 0;
         }
     </style>
 </head>
 <body>
 <div class="card">
-    <h1 th:text="${message}">Hello World</h1>
+    <h1>Потребители от MySQL (testdb.users)</h1>
+
+    <p class="empty" th:if="${#lists.isEmpty(userNames)}">Няма намерени потребители.</p>
+    <ul th:if="${!#lists.isEmpty(userNames)}">
+        <li th:each="userName : ${userNames}" th:text="${userName}">user</li>
+    </ul>
 </div>
 </body>
 </html>

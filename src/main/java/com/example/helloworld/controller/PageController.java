@@ -1,7 +1,6 @@
 package com.example.helloworld.controller;
 
-import com.example.helloworld.dto.GreetingResponse;
-import com.example.helloworld.service.GreetingService;
+import com.example.helloworld.service.UserService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -9,16 +8,15 @@ import org.springframework.web.bind.annotation.GetMapping;
 @Controller
 public class PageController {
 
-    private final GreetingService greetingService;
+    private final UserService userService;
 
-    public PageController(GreetingService greetingService) {
-        this.greetingService = greetingService;
+    public PageController(UserService userService) {
+        this.userService = userService;
     }
 
     @GetMapping("/")
     public String home(Model model) {
-        GreetingResponse greeting = greetingService.getHelloGreeting();
-        model.addAttribute("message", greeting.message());
+        model.addAttribute("userNames", userService.getAllUserNames());
         return "index";
     }
 }
