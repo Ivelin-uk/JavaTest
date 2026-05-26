@@ -3,22 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Role Manager Frontend</title>
+    <title>Admin Panel Frontend</title>
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <main class="layout">
     <header class="hero">
         <p class="badge">Frontend MVC</p>
-        <h1>Управление на роли</h1>
+        <h1>Администраторски панел</h1>
         <p class="subtitle">
-            Самостоятелен frontend за редакция на роли в таблица <strong>users</strong>.
+            Създаване и изтриване на потребители, смяна на парола и смяна на роля.
         </p>
     </header>
 
     <section class="panel">
+        <h2>Създаване на потребител</h2>
+        <form id="create-form" class="form-grid">
+            <input name="username" type="text" placeholder="Username" required>
+            <input name="name" type="text" placeholder="Име" required>
+            <input name="email" type="email" placeholder="Email" required>
+            <input name="password" type="password" placeholder="Парола (мин. 6)" required>
+            <select name="role">
+                <option value="USER">USER</option>
+                <option value="ADMIN">ADMIN</option>
+                <option value="MODERATOR">MODERATOR</option>
+                <option value="GUEST">GUEST</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Създай</button>
+        </form>
+    </section>
+
+    <section class="panel">
         <div class="panel-title">
-            <h2>Потребители и роли</h2>
+            <h2>Потребители</h2>
             <button id="reload-btn" class="btn btn-ghost" type="button">Обнови</button>
         </div>
         <p id="message" class="message" hidden></p>
@@ -27,8 +44,12 @@
                 <thead>
                 <tr>
                     <th>ID</th>
-                    <th>Потребител</th>
+                    <th>Username</th>
+                    <th>Име</th>
+                    <th>Email</th>
                     <th>Роля</th>
+                    <th>Парола</th>
+                    <th>Изтриване</th>
                 </tr>
                 </thead>
                 <tbody id="users-body"></tbody>

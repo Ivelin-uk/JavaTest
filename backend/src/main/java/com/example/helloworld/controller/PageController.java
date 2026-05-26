@@ -24,6 +24,24 @@ public class PageController {
         return "index";
     }
 
+    @PostMapping("/users")
+    public String createUser(
+            @RequestParam String username,
+            @RequestParam String name,
+            @RequestParam String email,
+            @RequestParam String password,
+            @RequestParam String role,
+            RedirectAttributes redirectAttributes
+    ) {
+        try {
+            userService.createUser(username, name, email, password, role);
+            redirectAttributes.addFlashAttribute("successMessage", "Потребителят е създаден успешно.");
+        } catch (RuntimeException ex) {
+            redirectAttributes.addFlashAttribute("errorMessage", ex.getMessage());
+        }
+        return "redirect:/";
+    }
+
     @PostMapping("/users/{id}/role")
     public String updateUserRole(
             @PathVariable Long id,
@@ -33,6 +51,35 @@ public class PageController {
         try {
             userService.updateUserRole(id, role);
             redirectAttributes.addFlashAttribute("successMessage", "Ролята е обновена успешно.");
+        } catch (RuntimeException ex) {
+            redirectAttributes.addFlashAttribute("errorMessage", ex.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/users/{id}/password")
+    public String updateUserPassword(
+            @PathVariable Long id,
+            @RequestParam String password,
+            RedirectAttributes redirectAttributes
+    ) {
+        try {
+            userService.updateUserPassword(id, password);
+            redirectAttributes.addFlashAttribute("successMessage", "Паролата е обновена успешно.");
+        } catch (RuntimeException ex) {
+            redirectAttributes.addFlashAttribute("errorMessage", ex.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/users/{id}/delete")
+    public String deleteUser(
+            @PathVariable Long id,
+            RedirectAttributes redirectAttributes
+    ) {
+        try {
+            userService.deleteUser(id);
+            redirectAttributes.addFlashAttribute("successMessage", "Потребителят е изтрит успешно.");
         } catch (RuntimeException ex) {
             redirectAttributes.addFlashAttribute("errorMessage", ex.getMessage());
         }

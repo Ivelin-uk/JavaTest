@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Role Management MVC</title>
+    <title>Admin Panel - Users</title>
     <style>
         :root {
             --bg: #f6f8fc;
@@ -11,6 +11,7 @@
             --text: #1f2a44;
             --muted: #66708a;
             --accent: #0f766e;
+            --danger: #be123c;
             --border: #dde3ee;
         }
         * {
@@ -25,7 +26,7 @@
             color: var(--text);
         }
         .container {
-            max-width: 980px;
+            max-width: 1080px;
             margin: 0 auto;
             display: grid;
             gap: 1rem;
@@ -41,12 +42,24 @@
             margin: 0;
             font-size: 1.5rem;
         }
+        h2 {
+            margin-top: 0;
+        }
         p {
             margin: 0.5rem 0 0;
             color: var(--muted);
         }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 0.6rem;
+            margin-top: 0.8rem;
+        }
+        input[type="text"],
+        input[type="email"],
+        input[type="password"],
         select {
-            min-width: 220px;
+            width: 100%;
             padding: 0.55rem 0.65rem;
             border-radius: 8px;
             border: 1px solid #c8d3e2;
@@ -62,6 +75,9 @@
         }
         .btn-primary {
             background: var(--accent);
+        }
+        .btn-danger {
+            background: var(--danger);
         }
         .table {
             width: 100%;
@@ -90,50 +106,66 @@
             color: #9f1239;
             border: 1px solid #fecdd3;
         }
-        .api-link {
-            color: #0c4a6e;
-            text-decoration: none;
-            font-weight: 600;
-        }
         .row-form {
             display: flex;
             gap: 0.4rem;
             flex-wrap: wrap;
             align-items: center;
         }
+        .small-input {
+            min-width: 170px;
+        }
     </style>
 </head>
 <body>
 <div class="container">
     <section class="card">
-        <h1>Role Management (MVC Backend)</h1>
-        <p>
-            Управление само на ролите за таблица <strong>users</strong>.
-            API: <a class="api-link" href="/api/users">/api/users</a>
-        </p>
+        <h1>Администраторски Панел</h1>
+        <p>Управление на потребители: създаване, изтриване, смяна на парола и смяна на роля.</p>
     </section>
 
     <section class="card">
         <div class="msg msg-success" th:if="${successMessage}" th:text="${successMessage}"></div>
         <div class="msg msg-error" th:if="${errorMessage}" th:text="${errorMessage}"></div>
+
+        <h2>Създаване на потребител</h2>
+        <form method="post" action="/users">
+            <div class="form-grid">
+                <input type="text" name="username" placeholder="Username" required>
+                <input type="text" name="name" placeholder="Име" required>
+                <input type="email" name="email" placeholder="Email" required>
+                <input type="password" name="password" placeholder="Парола (мин. 6)" required>
+                <select name="role">
+                    <option value="USER">USER</option>
+                    <option value="ADMIN">ADMIN</option>
+                    <option value="MODERATOR">MODERATOR</option>
+                    <option value="GUEST">GUEST</option>
+                </select>
+                <button class="btn-primary" type="submit">Създай</button>
+            </div>
+        </form>
     </section>
 
     <section class="card">
-        <h2>Списък с потребители и роли</h2>
+        <h2>Потребители</h2>
         <table class="table" th:if="${!#lists.isEmpty(users)}">
             <thead>
             <tr>
                 <th>ID</th>
-                <th>Потребител</th>
+                <th>Username</th>
+                <th>Име</th>
+                <th>Email</th>
                 <th>Роля</th>
+                <th>Парола</th>
+                <th>Изтриване</th>
             </tr>
             </thead>
             <tbody>
             <tr th:each="user : ${users}">
                 <td th:text="${user.id}">1</td>
-                <td>
-                    <span th:text="${user.username}">user</span>
-                </td>
+                <td th:text="${user.username}">user</td>
+                <td th:text="${user.name}">Name</td>
+                <td th:text="${user.email}">email@mail.com</td>
                 <td>
                     <form th:action="@{'/users/' + ${user.id} + '/role'}" method="post" class="row-form">
                         <select name="role">
@@ -143,6 +175,17 @@
                             <option value="GUEST" th:selected="${user.role == 'GUEST'}">GUEST</option>
                         </select>
                         <button class="btn-primary" type="submit">Запази</button>
+                    </form>
+                </td>
+                <td>
+                    <form th:action="@{'/users/' + ${user.id} + '/password'}" method="post" class="row-form">
+                        <input class="small-input" type="password" name="password" placeholder="Нова парола" required>
+                        <button class="btn-primary" type="submit">Смени</button>
+                    </form>
+                </td>
+                <td>
+                    <form th:action="@{'/users/' + ${user.id} + '/delete'}" method="post">
+                        <button class="btn-danger" type="submit">Изтрий</button>
                     </form>
                 </td>
             </tr>
