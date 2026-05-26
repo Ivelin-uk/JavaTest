@@ -3,54 +3,172 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Users From MySQL</title>
+    <title>User Management MVC</title>
     <style>
+        :root {
+            --bg: #f6f8fc;
+            --card: #ffffff;
+            --text: #1f2a44;
+            --muted: #66708a;
+            --accent: #0f766e;
+            --danger: #be123c;
+            --border: #dde3ee;
+        }
+        * {
+            box-sizing: border-box;
+        }
         body {
-            margin: 0 auto;
-            max-width: 760px;
-            min-height: 100vh;
+            margin: 0;
             padding: 2rem 1rem;
-            background: linear-gradient(145deg, #f4f6fb, #dfe8ff);
+            min-height: 100vh;
             font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(145deg, #ecf2ff, var(--bg));
+            color: var(--text);
         }
-
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            display: grid;
+            gap: 1rem;
+        }
         .card {
-            padding: 2rem;
-            border-radius: 1rem;
-            background: #ffffff;
-            box-shadow: 0 12px 30px rgba(24, 39, 75, 0.15);
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            box-shadow: 0 12px 30px rgba(24, 39, 75, 0.1);
+            padding: 1.25rem;
         }
-
         h1 {
-            margin: 0 0 1rem;
-            color: #1f2a44;
-            letter-spacing: 0.03em;
-        }
-
-        ul {
             margin: 0;
-            padding-left: 1.2rem;
+            font-size: 1.5rem;
         }
-
-        li {
-            margin: 0.35rem 0;
-            color: #2d3b58;
+        p {
+            margin: 0.5rem 0 0;
+            color: var(--muted);
         }
-
-        .empty {
-            color: #4c5a75;
-            margin: 0;
+        form {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        input[type="text"] {
+            min-width: 220px;
+            flex: 1 1 260px;
+            padding: 0.55rem 0.65rem;
+            border-radius: 8px;
+            border: 1px solid #c8d3e2;
+        }
+        button {
+            border: none;
+            border-radius: 8px;
+            padding: 0.55rem 0.85rem;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-primary {
+            background: var(--accent);
+        }
+        .btn-danger {
+            background: var(--danger);
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .table th,
+        .table td {
+            border-bottom: 1px solid var(--border);
+            padding: 0.6rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        .msg {
+            padding: 0.65rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            margin-bottom: 0.75rem;
+        }
+        .msg-success {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+        .msg-error {
+            background: #ffe4e6;
+            color: #9f1239;
+            border: 1px solid #fecdd3;
+        }
+        .api-link {
+            color: #0c4a6e;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .actions {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+        .row-form {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            align-items: center;
         }
     </style>
 </head>
 <body>
-<div class="card">
-    <h1>Потребители от MySQL (testdb.users)</h1>
+<div class="container">
+    <section class="card">
+        <h1>User Management (MVC Backend)</h1>
+        <p>
+            Това е Thymeleaf изглед за MVC слоя.
+            API: <a class="api-link" href="/api/users">/api/users</a>
+        </p>
+    </section>
 
-    <p class="empty" th:if="${#lists.isEmpty(userNames)}">Няма намерени потребители.</p>
-    <ul th:if="${!#lists.isEmpty(userNames)}">
-        <li th:each="userName : ${userNames}" th:text="${userName}">user</li>
-    </ul>
+    <section class="card">
+        <div class="msg msg-success" th:if="${successMessage}" th:text="${successMessage}"></div>
+        <div class="msg msg-error" th:if="${errorMessage}" th:text="${errorMessage}"></div>
+
+        <h2>Нов потребител</h2>
+        <form method="post" action="/users">
+            <input type="text" name="username" placeholder="Потребителско име (2-60 символа)" required>
+            <button class="btn-primary" type="submit">Добави</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Списък с потребители</h2>
+        <table class="table" th:if="${!#lists.isEmpty(users)}">
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th>Потребител</th>
+                <th>Действия</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="user : ${users}">
+                <td th:text="${user.id}">1</td>
+                <td>
+                    <form th:action="@{'/users/' + ${user.id} + '/update'}" method="post" class="row-form">
+                        <input type="text" name="username" th:value="${user.username}" required>
+                        <button class="btn-primary" type="submit">Запази</button>
+                    </form>
+                </td>
+                <td>
+                    <div class="actions">
+                        <form th:action="@{'/users/' + ${user.id} + '/delete'}" method="post">
+                            <button class="btn-danger" type="submit">Изтрий</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p th:if="${#lists.isEmpty(users)}">Няма намерени потребители.</p>
+    </section>
 </div>
 </body>
 </html>

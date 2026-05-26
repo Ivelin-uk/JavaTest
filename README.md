@@ -1,80 +1,83 @@
-# Проект: Spring Boot + MySQL (Потребители)
+# User Management System (MVC)
 
-Това е уеб приложение със Spring Boot, което чете потребители от MySQL база данни и ги показва:
-- в уеб страница
-- през REST API
+Пълен пример за проект с:
+- `backend` (Spring Boot, MVC архитектура, REST API, MySQL)
+- `frondend` (самостоятелен frontend с JavaScript MVC подход)
 
-## Структура на проекта
+## Какво е реализирано
 
-- `backend/` - Spring Boot приложение
-- `frondend/` - в момента е празна папка
+### Backend (`backend/`)
+- `Model`: `User`
+- `Repository`: `UserRepository` (JdbcTemplate, CRUD)
+- `Service`: `UserService` + `UserServiceImpl` (бизнес логика, валидация)
+- `Controller`:
+  - `PageController` за server-side MVC страница (Thymeleaf)
+  - `UserController` за REST API
+- `GlobalExceptionHandler` за централизирани API грешки
+- `schema.sql` и `data.sql` за инициализация на БД
 
-## Технологии
-
-- Java 17+
-- Spring Boot 3.2.6
-- Maven
-- MySQL
-- Thymeleaf
+### Frontend (`frondend/`)
+- Отделни JavaScript класове:
+  - `UserModel` (достъп до API)
+  - `UserView` (DOM визуализация)
+  - `UserController` (управление на събития/потоци)
+- CRUD операции: списък, добавяне, редакция, изтриване
 
 ## Изисквания
 
-Преди стартиране е необходимо да имаш инсталирани:
-- Java 17 или по-нова
+- Java 17+
 - Maven 3.9+
-- MySQL (локално)
+- MySQL 8+
 
 ## Конфигурация на базата данни
 
-Приложението по подразбиране използва:
+По подразбиране backend ползва:
 - URL: `jdbc:mysql://localhost:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC`
-- Потребител: `root`
-- Парола: празна
+- Username: `root`
+- Password: празна
 
-Създай база и таблица:
+Може да ги промениш с:
+- `DB_URL`
+- `DB_USERNAME`
+- `DB_PASSWORD`
 
-```sql
-CREATE DATABASE IF NOT EXISTS testdb;
-USE testdb;
-
-CREATE TABLE IF NOT EXISTS users (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  username VARCHAR(255) NOT NULL
-);
-```
-
-Примерни данни (по желание):
-
-```sql
-INSERT INTO users (username) VALUES ('Ivan'), ('Maria'), ('Georgi');
-```
-
-## Стартиране на проекта
-
-От главната директория на проекта:
+## Стартиране на backend
 
 ```bash
 cd backend
 mvn spring-boot:run
 ```
 
-## Достъп до приложението
+След старт:
+- MVC страница: `http://localhost:8081/`
+- REST API: `http://localhost:8081/api/users`
 
-- Уеб страница: `http://localhost:8081/`
-- API endpoint: `http://localhost:8081/api/users/names`
+## Стартиране на frontend
 
-## Промяна на DB настройките (по желание)
+Отделният frontend е в `frondend/`.
 
-Можеш да подадеш променливи на средата:
-- `DB_URL`
-- `DB_USERNAME`
-- `DB_PASSWORD`
-
-Пример:
-
+Вариант 1 (препоръчително):
 ```bash
-DB_URL="jdbc:mysql://localhost:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
-DB_USERNAME="root" \
-DB_PASSWORD="" \
-mvn spring-boot:run
+cd frondend
+python3 -m http.server 5500
+```
+Отвори: `http://localhost:5500`
+
+Вариант 2:
+- отвори `frondend/index.html` директно в браузър
+
+## REST API endpoints
+
+- `GET /api/users` - всички потребители
+- `GET /api/users/{id}` - потребител по ID
+- `POST /api/users` - създаване
+- `PUT /api/users/{id}` - редакция
+- `DELETE /api/users/{id}` - изтриване
+
+Пример за `POST`:
+
+```json
+{
+  "username": "new_user"
+}
 ```
