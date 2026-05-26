@@ -1,7 +1,7 @@
-INSERT INTO users (username)
+INSERT INTO mvc_users (username)
 SELECT 'ivan'
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'ivan');
+WHERE NOT EXISTS (SELECT 1 FROM mvc_users WHERE username = 'ivan');
 
-INSERT INTO users (username)
+INSERT INTO mvc_users (username)
 SELECT 'maria'
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'maria');
+WHERE NOT EXISTS (SELECT 1 FROM mvc_users WHERE username = 'maria');

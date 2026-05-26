@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Management MVC</title>
+    <title>Role Management MVC</title>
     <style>
         :root {
             --bg: #f6f8fc;
@@ -11,7 +11,6 @@
             --text: #1f2a44;
             --muted: #66708a;
             --accent: #0f766e;
-            --danger: #be123c;
             --border: #dde3ee;
         }
         * {
@@ -46,17 +45,12 @@
             margin: 0.5rem 0 0;
             color: var(--muted);
         }
-        form {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-        input[type="text"] {
+        select {
             min-width: 220px;
-            flex: 1 1 260px;
             padding: 0.55rem 0.65rem;
             border-radius: 8px;
             border: 1px solid #c8d3e2;
+            background: #fff;
         }
         button {
             border: none;
@@ -68,9 +62,6 @@
         }
         .btn-primary {
             background: var(--accent);
-        }
-        .btn-danger {
-            background: var(--danger);
         }
         .table {
             width: 100%;
@@ -104,11 +95,6 @@
             text-decoration: none;
             font-weight: 600;
         }
-        .actions {
-            display: flex;
-            gap: 0.4rem;
-            flex-wrap: wrap;
-        }
         .row-form {
             display: flex;
             gap: 0.4rem;
@@ -120,9 +106,9 @@
 <body>
 <div class="container">
     <section class="card">
-        <h1>User Management (MVC Backend)</h1>
+        <h1>Role Management (MVC Backend)</h1>
         <p>
-            Това е Thymeleaf изглед за MVC слоя.
+            Управление само на ролите за таблица <strong>users</strong>.
             API: <a class="api-link" href="/api/users">/api/users</a>
         </p>
     </section>
@@ -130,44 +116,39 @@
     <section class="card">
         <div class="msg msg-success" th:if="${successMessage}" th:text="${successMessage}"></div>
         <div class="msg msg-error" th:if="${errorMessage}" th:text="${errorMessage}"></div>
-
-        <h2>Нов потребител</h2>
-        <form method="post" action="/users">
-            <input type="text" name="username" placeholder="Потребителско име (2-60 символа)" required>
-            <button class="btn-primary" type="submit">Добави</button>
-        </form>
     </section>
 
     <section class="card">
-        <h2>Списък с потребители</h2>
+        <h2>Списък с потребители и роли</h2>
         <table class="table" th:if="${!#lists.isEmpty(users)}">
             <thead>
             <tr>
                 <th>ID</th>
                 <th>Потребител</th>
-                <th>Действия</th>
+                <th>Роля</th>
             </tr>
             </thead>
             <tbody>
             <tr th:each="user : ${users}">
                 <td th:text="${user.id}">1</td>
                 <td>
-                    <form th:action="@{'/users/' + ${user.id} + '/update'}" method="post" class="row-form">
-                        <input type="text" name="username" th:value="${user.username}" required>
-                        <button class="btn-primary" type="submit">Запази</button>
-                    </form>
+                    <span th:text="${user.username}">user</span>
                 </td>
                 <td>
-                    <div class="actions">
-                        <form th:action="@{'/users/' + ${user.id} + '/delete'}" method="post">
-                            <button class="btn-danger" type="submit">Изтрий</button>
-                        </form>
-                    </div>
+                    <form th:action="@{'/users/' + ${user.id} + '/role'}" method="post" class="row-form">
+                        <select name="role">
+                            <option value="USER" th:selected="${user.role == 'USER'}">USER</option>
+                            <option value="ADMIN" th:selected="${user.role == 'ADMIN'}">ADMIN</option>
+                            <option value="MODERATOR" th:selected="${user.role == 'MODERATOR'}">MODERATOR</option>
+                            <option value="GUEST" th:selected="${user.role == 'GUEST'}">GUEST</option>
+                        </select>
+                        <button class="btn-primary" type="submit">Запази</button>
+                    </form>
                 </td>
             </tr>
             </tbody>
         </table>
-        <p th:if="${#lists.isEmpty(users)}">Няма намерени потребители.</p>
+        <p th:if="${#lists.isEmpty(users)}">Няма потребители в таблицата users.</p>
     </section>
 </div>
 </body>

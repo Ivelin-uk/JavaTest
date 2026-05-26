@@ -3,30 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Manager Frontend</title>
+    <title>Role Manager Frontend</title>
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <main class="layout">
     <header class="hero">
         <p class="badge">Frontend MVC</p>
-        <h1>Управление на потребители</h1>
+        <h1>Управление на роли</h1>
         <p class="subtitle">
-            Самостоятелен frontend, който работи с Spring Boot backend API.
+            Самостоятелен frontend за редакция на роли в таблица <strong>users</strong>.
         </p>
     </header>
 
     <section class="panel">
-        <h2>Добавяне на потребител</h2>
-        <form id="create-form" class="form-inline">
-            <input id="create-username" type="text" placeholder="Потребителско име (2-60 символа)" required>
-            <button type="submit" class="btn btn-primary">Добави</button>
-        </form>
-    </section>
-
-    <section class="panel">
         <div class="panel-title">
-            <h2>Списък с потребители</h2>
+            <h2>Потребители и роли</h2>
             <button id="reload-btn" class="btn btn-ghost" type="button">Обнови</button>
         </div>
         <p id="message" class="message" hidden></p>
@@ -35,8 +27,8 @@
                 <thead>
                 <tr>
                     <th>ID</th>
-                    <th>Потребителско име</th>
-                    <th>Действия</th>
+                    <th>Потребител</th>
+                    <th>Роля</th>
                 </tr>
                 </thead>
                 <tbody id="users-body"></tbody>

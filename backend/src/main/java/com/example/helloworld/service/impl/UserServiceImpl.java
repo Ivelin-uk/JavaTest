@@ -1,6 +1,5 @@
 package com.example.helloworld.service.impl;
 
-import com.example.helloworld.exception.DuplicateUserException;
 import com.example.helloworld.exception.UserNotFoundException;
 import com.example.helloworld.model.User;
 import com.example.helloworld.repository.UserRepository;
@@ -30,47 +29,22 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public User createUser(String username) {
-        String normalizedUsername = normalizeUsername(username);
-        if (userRepository.findByUsername(normalizedUsername).isPresent()) {
-            throw new DuplicateUserException("Потребител с име '" + normalizedUsername + "' вече съществува.");
-        }
-        return userRepository.save(normalizedUsername);
-    }
-
-    @Override
-    public User updateUser(Long id, String username) {
-        User existingUser = getUserById(id);
-        String normalizedUsername = normalizeUsername(username);
-        userRepository.findByUsername(normalizedUsername)
-                .ifPresent(user -> {
-                    if (!user.getId().equals(existingUser.getId())) {
-                        throw new DuplicateUserException(
-                                "Потребител с име '" + normalizedUsername + "' вече съществува."
-                        );
-                    }
-                });
-
-        return userRepository.update(id, normalizedUsername)
+    public User updateUserRole(Long id, String role) {
+        getUserById(id);
+        String normalizedRole = normalizeRole(role);
+        return userRepository.updateRole(id, normalizedRole)
                 .orElseThrow(() -> new UserNotFoundException("Потребител с id " + id + " не беше намерен."));
     }
 
-    @Override
-    public void deleteUser(Long id) {
-        getUserById(id);
-        userRepository.deleteById(id);
-    }
-
-    private String normalizeUsername(String username) {
-        if (!StringUtils.hasText(username)) {
-            throw new IllegalArgumentException("Потребителското име е задължително.");
+    private String normalizeRole(String role) {
+        if (!StringUtils.hasText(role)) {
+            throw new IllegalArgumentException("Ролята е задължителна.");
         }
 
-        String normalized = username.trim();
-        if (normalized.length() < 2 || normalized.length() > 60) {
-            throw new IllegalArgumentException("Потребителското име трябва да е между 2 и 60 символа.");
+        String normalized = role.trim().toUpperCase();
+        if (!normalized.matches("^[A-Z_]{2,30}$")) {
+            throw new IllegalArgumentException("Ролята трябва да е 2-30 символа, само главни букви и _.");
         }
-
         return normalized;
     }
 }

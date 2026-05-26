@@ -24,40 +24,15 @@ public class PageController {
         return "index";
     }
 
-    @PostMapping("/users")
-    public String createUser(
-            @RequestParam String username,
-            RedirectAttributes redirectAttributes
-    ) {
-        try {
-            userService.createUser(username);
-            redirectAttributes.addFlashAttribute("successMessage", "Потребителят е създаден успешно.");
-        } catch (RuntimeException ex) {
-            redirectAttributes.addFlashAttribute("errorMessage", ex.getMessage());
-        }
-        return "redirect:/";
-    }
-
-    @PostMapping("/users/{id}/update")
-    public String updateUser(
+    @PostMapping("/users/{id}/role")
+    public String updateUserRole(
             @PathVariable Long id,
-            @RequestParam String username,
+            @RequestParam String role,
             RedirectAttributes redirectAttributes
     ) {
         try {
-            userService.updateUser(id, username);
-            redirectAttributes.addFlashAttribute("successMessage", "Потребителят е редактиран успешно.");
-        } catch (RuntimeException ex) {
-            redirectAttributes.addFlashAttribute("errorMessage", ex.getMessage());
-        }
-        return "redirect:/";
-    }
-
-    @PostMapping("/users/{id}/delete")
-    public String deleteUser(@PathVariable Long id, RedirectAttributes redirectAttributes) {
-        try {
-            userService.deleteUser(id);
-            redirectAttributes.addFlashAttribute("successMessage", "Потребителят е изтрит успешно.");
+            userService.updateUserRole(id, role);
+            redirectAttributes.addFlashAttribute("successMessage", "Ролята е обновена успешно.");
         } catch (RuntimeException ex) {
             redirectAttributes.addFlashAttribute("errorMessage", ex.getMessage());
         }

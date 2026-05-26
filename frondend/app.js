@@ -7,22 +7,11 @@ class UserModel {
         return this.request("/users");
     }
 
-    async createUser(username) {
-        return this.request("/users", {
-            method: "POST",
-            body: JSON.stringify({username})
-        });
-    }
-
-    async updateUser(id, username) {
-        return this.request(`/users/${id}`, {
+    async updateRole(id, role) {
+        return this.request(`/users/${id}/role`, {
             method: "PUT",
-            body: JSON.stringify({username})
+            body: JSON.stringify({role})
         });
-    }
-
-    async deleteUser(id) {
-        await this.request(`/users/${id}`, {method: "DELETE"});
     }
 
     async request(path, options = {}) {
@@ -46,40 +35,25 @@ class UserModel {
 
 class UserView {
     constructor() {
-        this.form = document.querySelector("#create-form");
-        this.createInput = document.querySelector("#create-username");
         this.usersBody = document.querySelector("#users-body");
         this.reloadButton = document.querySelector("#reload-btn");
         this.message = document.querySelector("#message");
-    }
-
-    bindCreate(handler) {
-        this.form.addEventListener("submit", (event) => {
-            event.preventDefault();
-            handler(this.createInput.value);
-        });
+        this.defaultRoles = ["USER", "ADMIN", "MODERATOR", "GUEST"];
     }
 
     bindReload(handler) {
         this.reloadButton.addEventListener("click", handler);
     }
 
-    bindTableActions({onUpdate, onDelete}) {
+    bindTableActions({onUpdateRole}) {
         this.usersBody.addEventListener("click", (event) => {
             const updateBtn = event.target.closest("[data-action='update']");
-            const deleteBtn = event.target.closest("[data-action='delete']");
 
             if (updateBtn) {
                 const row = updateBtn.closest("tr");
-                const id = row.dataset.userId;
-                const input = row.querySelector("input");
-                onUpdate(Number(id), input.value);
-            }
-
-            if (deleteBtn) {
-                const row = deleteBtn.closest("tr");
                 const id = Number(row.dataset.userId);
-                onDelete(id);
+                const select = row.querySelector("select");
+                onUpdateRole(id, select.value);
             }
         });
     }
@@ -98,12 +72,14 @@ class UserView {
             <tr data-user-id="${user.id}">
                 <td>${user.id}</td>
                 <td>
-                    <input type="text" value="${this.escapeHtml(user.username)}" />
+                    ${this.escapeHtml(user.username)}
                 </td>
                 <td>
                     <div class="row-controls">
-                        <button type="button" class="btn btn-primary" data-action="update">Запази</button>
-                        <button type="button" class="btn btn-danger" data-action="delete">Изтрий</button>
+                        <select>
+                            ${this.roleOptions(user.role)}
+                        </select>
+                        <button type="button" class="btn btn-primary" data-action="update">Запази роля</button>
                     </div>
                 </td>
             </tr>
@@ -122,8 +98,16 @@ class UserView {
         this.message.className = "message";
     }
 
-    clearCreateInput() {
-        this.createInput.value = "";
+    roleOptions(currentRole) {
+        const normalizedRole = (currentRole || "").toUpperCase();
+        const roles = [...this.defaultRoles];
+        if (normalizedRole && !roles.includes(normalizedRole)) {
+            roles.push(normalizedRole);
+        }
+
+        return roles.map((role) => `
+            <option value="${role}" ${role === normalizedRole ? "selected" : ""}>${role}</option>
+        `).join("");
     }
 
     escapeHtml(value) {
@@ -141,11 +125,9 @@ class UserController {
         this.model = model;
         this.view = view;
 
-        this.view.bindCreate((username) => this.createUser(username));
         this.view.bindReload(() => this.loadUsers());
         this.view.bindTableActions({
-            onUpdate: (id, username) => this.updateUser(id, username),
-            onDelete: (id) => this.deleteUser(id)
+            onUpdateRole: (id, role) => this.updateRole(id, role)
         });
     }
 
@@ -163,35 +145,10 @@ class UserController {
         }
     }
 
-    async createUser(username) {
+    async updateRole(id, role) {
         try {
-            await this.model.createUser(username);
-            this.view.showMessage("Потребителят е създаден успешно.");
-            this.view.clearCreateInput();
-            await this.loadUsers();
-        } catch (error) {
-            this.view.showMessage(error.message, "error");
-        }
-    }
-
-    async updateUser(id, username) {
-        try {
-            await this.model.updateUser(id, username);
-            this.view.showMessage("Потребителят е редактиран успешно.");
-            await this.loadUsers();
-        } catch (error) {
-            this.view.showMessage(error.message, "error");
-        }
-    }
-
-    async deleteUser(id) {
-        if (!window.confirm("Сигурен ли си, че искаш да изтриеш този потребител?")) {
-            return;
-        }
-
-        try {
-            await this.model.deleteUser(id);
-            this.view.showMessage("Потребителят е изтрит успешно.");
+            await this.model.updateRole(id, role);
+            this.view.showMessage("Ролята е обновена успешно.");
             await this.loadUsers();
         } catch (error) {
             this.view.showMessage(error.message, "error");
