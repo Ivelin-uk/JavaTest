@@ -2,7 +2,7 @@
 
 Проектът е разделен на:
 - `backend/` - Spring Boot REST API (без templates/views)
-- `frondend/` - всички изгледи (HTML/CSS/JS)
+- `frondend/` - React frontend (Vite)
 
 ## Backend (само endpoints)
 
@@ -40,11 +40,12 @@ Backend URL:
 
 ```bash
 cd frondend
-python3 -m http.server 5500
+npm install
+npm run dev
 ```
 
 Frontend URL:
-- `http://localhost:5500`
+- `http://localhost:5173`
 
 ## Бележки
 
