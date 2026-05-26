@@ -6,7 +6,7 @@ import com.example.helloworld.model.User;
 import com.example.helloworld.repository.UserRepository;
 import com.example.helloworld.service.UserService;
 import java.util.List;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -14,10 +14,11 @@ import org.springframework.util.StringUtils;
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
-    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    private final PasswordEncoder passwordEncoder;
 
-    public UserServiceImpl(UserRepository userRepository) {
+    public UserServiceImpl(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Override
@@ -52,8 +53,15 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public User updateUserRole(Long id, String role) {
-        getUserById(id);
+        User existing = getUserById(id);
         String normalizedRole = normalizeRole(role);
+        if ("ADMIN".equals(existing.getRole())
+                && existing.isActive()
+                && !"ADMIN".equals(normalizedRole)
+                && userRepository.countActiveAdmins() <= 1) {
+            throw new IllegalArgumentException("Трябва да има поне един активен администратор.");
+        }
+
         return userRepository.updateRole(id, normalizedRole)
                 .orElseThrow(() -> new UserNotFoundException("Потребител с id " + id + " не беше намерен."));
     }
@@ -68,8 +76,27 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public User updateUserActivation(Long id, boolean active) {
+        User existing = getUserById(id);
+        if ("ADMIN".equals(existing.getRole())
+                && existing.isActive()
+                && !active
+                && userRepository.countActiveAdmins() <= 1) {
+            throw new IllegalArgumentException("Не можеш да деактивираш последния активен администратор.");
+        }
+
+        return userRepository.updateActiveStatus(id, active)
+                .orElseThrow(() -> new UserNotFoundException("Потребител с id " + id + " не беше намерен."));
+    }
+
+    @Override
     public void deleteUser(Long id) {
-        getUserById(id);
+        User existing = getUserById(id);
+        if ("ADMIN".equals(existing.getRole())
+                && existing.isActive()
+                && userRepository.countActiveAdmins() <= 1) {
+            throw new IllegalArgumentException("Не можеш да изтриеш последния активен администратор.");
+        }
         userRepository.deleteById(id);
     }
 

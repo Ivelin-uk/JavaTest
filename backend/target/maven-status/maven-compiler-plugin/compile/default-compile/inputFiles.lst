@@ -1,9 +1,14 @@
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/UpdateRoleRequest.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/model/User.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/service/impl/UserServiceImpl.java
+/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/UpdateActivationRequest.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/ErrorResponse.java
+/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/security/SecurityConfig.java
+/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/security/DatabaseUserDetailsService.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/repository/UserRepository.java
+/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/config/DatabaseSchemaInitializer.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/UpdatePasswordRequest.java
+/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/config/AdminBootstrapInitializer.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/exception/GlobalExceptionHandler.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/exception/DuplicateUserException.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/service/UserService.java

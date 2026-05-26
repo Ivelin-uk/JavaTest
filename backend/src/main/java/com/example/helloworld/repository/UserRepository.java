@@ -15,13 +15,16 @@ import org.springframework.stereotype.Repository;
 public class UserRepository {
 
     private static final String TABLE_NAME = "users";
+    public record UserAuthData(String username, String passwordHash, String role, boolean active) {}
+
     private final JdbcTemplate jdbcTemplate;
     private final RowMapper<User> userRowMapper = (rs, rowNum) -> new User(
             rs.getLong("id"),
             rs.getString("username"),
             rs.getString("name"),
             rs.getString("email"),
-            rs.getString("role")
+            rs.getString("role"),
+            rs.getBoolean("is_active")
     );
 
     public UserRepository(JdbcTemplate jdbcTemplate) {
@@ -35,7 +38,8 @@ public class UserRepository {
                        COALESCE(NULLIF(username, ''), NULLIF(name, ''), NULLIF(email, ''), CONCAT('user-', id)) AS username,
                        name,
                        email,
-                       role
+                       role,
+                       COALESCE(is_active, 1) AS is_active
                 FROM users
                 ORDER BY id
                 """,
@@ -50,7 +54,8 @@ public class UserRepository {
                        COALESCE(NULLIF(username, ''), NULLIF(name, ''), NULLIF(email, ''), CONCAT('user-', id)) AS username,
                        name,
                        email,
-                       role
+                       role,
+                       COALESCE(is_active, 1) AS is_active
                 FROM users
                 WHERE id = ?
                 """,
@@ -70,7 +75,8 @@ public class UserRepository {
                        COALESCE(NULLIF(username, ''), NULLIF(name, ''), NULLIF(email, ''), CONCAT('user-', id)) AS username,
                        name,
                        email,
-                       role
+                       role,
+                       COALESCE(is_active, 1) AS is_active
                 FROM users
                 WHERE username = ?
                 LIMIT 1
@@ -91,7 +97,8 @@ public class UserRepository {
                        COALESCE(NULLIF(username, ''), NULLIF(name, ''), NULLIF(email, ''), CONCAT('user-', id)) AS username,
                        name,
                        email,
-                       role
+                       role,
+                       COALESCE(is_active, 1) AS is_active
                 FROM users
                 WHERE email = ?
                 LIMIT 1
@@ -105,11 +112,50 @@ public class UserRepository {
         return Optional.of(users.get(0));
     }
 
+    public Optional<UserAuthData> findAuthByLogin(String login) {
+        List<UserAuthData> users = jdbcTemplate.query(
+                """
+                SELECT COALESCE(NULLIF(username, ''), email) AS username,
+                       password_hash,
+                       role,
+                       COALESCE(is_active, 1) AS is_active
+                FROM users
+                WHERE username = ? OR email = ?
+                LIMIT 1
+                """,
+                (rs, rowNum) -> new UserAuthData(
+                        rs.getString("username"),
+                        rs.getString("password_hash"),
+                        rs.getString("role"),
+                        rs.getBoolean("is_active")
+                ),
+                login,
+                login
+        );
+        if (users.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(users.get(0));
+    }
+
+    public int countAllUsers() {
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    public int countActiveAdmins() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND COALESCE(is_active, 1) = 1",
+                Integer.class
+        );
+        return count == null ? 0 : count;
+    }
+
     public User save(String username, String name, String email, String passwordHash, String role) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO users (name, email, password_hash, role, username) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO users (name, email, password_hash, role, username, is_active) VALUES (?, ?, ?, ?, ?, ?)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setString(1, name);
@@ -117,6 +163,7 @@ public class UserRepository {
             ps.setString(3, passwordHash);
             ps.setString(4, role);
             ps.setString(5, username);
+            ps.setBoolean(6, true);
             return ps;
         }, keyHolder);
 
@@ -145,6 +192,18 @@ public class UserRepository {
         int rows = jdbcTemplate.update(
                 "UPDATE " + TABLE_NAME + " SET password_hash = ? WHERE id = ?",
                 passwordHash,
+                id
+        );
+        if (rows == 0) {
+            return Optional.empty();
+        }
+        return findById(id);
+    }
+
+    public Optional<User> updateActiveStatus(Long id, boolean active) {
+        int rows = jdbcTemplate.update(
+                "UPDATE " + TABLE_NAME + " SET is_active = ? WHERE id = ?",
+                active,
                 id
         );
         if (rows == 0) {

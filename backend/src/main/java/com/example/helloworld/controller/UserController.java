@@ -1,6 +1,7 @@
 package com.example.helloworld.controller;
 
 import com.example.helloworld.dto.CreateUserRequest;
+import com.example.helloworld.dto.UpdateActivationRequest;
 import com.example.helloworld.dto.UpdatePasswordRequest;
 import com.example.helloworld.dto.UpdateRoleRequest;
 import com.example.helloworld.model.User;
@@ -60,6 +61,11 @@ public class UserController {
     @PutMapping("/{id}/password")
     public User updateUserPassword(@PathVariable Long id, @Valid @RequestBody UpdatePasswordRequest request) {
         return userService.updateUserPassword(id, request.password());
+    }
+
+    @PutMapping("/{id}/activation")
+    public User updateUserActivation(@PathVariable Long id, @Valid @RequestBody UpdateActivationRequest request) {
+        return userService.updateUserActivation(id, request.active());
     }
 
     @DeleteMapping("/{id}")
