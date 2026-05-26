@@ -2,7 +2,6 @@
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/model/User.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/service/impl/UserServiceImpl.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/ErrorResponse.java
-/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/controller/PageController.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/repository/UserRepository.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/UpdatePasswordRequest.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/exception/GlobalExceptionHandler.java

@@ -1,83 +1,52 @@
-# User Management System (MVC)
+# User Admin Panel
 
-Пълен пример за проект с:
-- `backend` (Spring Boot, MVC архитектура, REST API, MySQL)
-- `frondend` (самостоятелен frontend с JavaScript MVC подход)
+Проектът е разделен на:
+- `backend/` - Spring Boot REST API (без templates/views)
+- `frondend/` - всички изгледи (HTML/CSS/JS)
 
-## Какво е реализирано
+## Backend (само endpoints)
 
-### Backend (`backend/`)
-- `Model`: `User`
-- `Repository`: `UserRepository` (JdbcTemplate, CRUD)
-- `Service`: `UserService` + `UserServiceImpl` (бизнес логика, валидация)
-- `Controller`:
-  - `PageController` за server-side MVC страница (Thymeleaf)
-  - `UserController` за REST API
-- `GlobalExceptionHandler` за централизирани API грешки
-- `schema.sql` и `data.sql` за инициализация на БД
+Backend работи с таблица `users` и поддържа:
+- създаване на потребител
+- изтриване на потребител
+- смяна на парола
+- смяна на роля
 
-### Frontend (`frondend/`)
-- Отделни JavaScript класове:
-  - `UserModel` (достъп до API)
-  - `UserView` (DOM визуализация)
-  - `UserController` (управление на събития/потоци)
-- CRUD операции: списък, добавяне, редакция, изтриване
+### API endpoints
 
-## Изисквания
+- `GET /api/users`
+- `GET /api/users/{id}`
+- `POST /api/users`
+- `PUT /api/users/{id}/role`
+- `PUT /api/users/{id}/password`
+- `DELETE /api/users/{id}`
 
-- Java 17+
-- Maven 3.9+
-- MySQL 8+
+## Стартиране
 
-## Конфигурация на базата данни
-
-По подразбиране backend ползва:
-- URL: `jdbc:mysql://localhost:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC`
-- Username: `root`
-- Password: празна
-
-Може да ги промениш с:
-- `DB_URL`
-- `DB_USERNAME`
-- `DB_PASSWORD`
-
-## Стартиране на backend
+### 1) Backend
 
 ```bash
 cd backend
+DB_URL="jdbc:mysql://127.0.0.1:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
+DB_USERNAME="root" \
+DB_PASSWORD="" \
 mvn spring-boot:run
 ```
 
-След старт:
-- MVC страница: `http://localhost:8081/`
-- REST API: `http://localhost:8081/api/users`
+Backend URL:
+- `http://localhost:8081`
 
-## Стартиране на frontend
+### 2) Frontend
 
-Отделният frontend е в `frondend/`.
-
-Вариант 1 (препоръчително):
 ```bash
 cd frondend
 python3 -m http.server 5500
 ```
-Отвори: `http://localhost:5500`
 
-Вариант 2:
-- отвори `frondend/index.html` директно в браузър
+Frontend URL:
+- `http://localhost:5500`
 
-## REST API endpoints
+## Бележки
 
-- `GET /api/users` - всички потребители
-- `GET /api/users/{id}` - потребител по ID
-- `POST /api/users` - създаване
-- `PUT /api/users/{id}` - редакция
-- `DELETE /api/users/{id}` - изтриване
-
-Пример за `POST`:
-
-```json
-{
-  "username": "new_user"
-}
-```
+- В backend **няма** `templates` и няма server-side view rendering.
+- Полето `password_hash` се записва с BCrypt hash.
