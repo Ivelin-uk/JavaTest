@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8081/api";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8081/api`;
 const DEFAULT_ROLES = ["STUDENT", "TEACHER", "ADMIN"];
 const AUTH_TOKEN_KEY = "admin_panel_auth_token";
 
@@ -17,7 +19,7 @@ async function request(path, options = {}, authToken) {
       headers
     });
   } catch {
-    throw new Error("Няма връзка с backend-а. Стартирай Spring приложението на http://localhost:8081.");
+    throw new Error(`Няма връзка с backend-а (${API_BASE_URL}). Стартирай Spring приложението.`);
   }
 
   if (response.status === 204) {

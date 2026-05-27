@@ -1,53 +1,60 @@
-# User Admin Panel
+# Система за тестове (MVC: Spring Boot + React)
 
-Проектът е разделен на:
-- `backend/` - Spring Boot REST API (без templates/views)
-- `frondend/` - React frontend (Vite)
+## Структура
+- `backend/` - Spring Boot REST API (само endpoints, без templates/views)
+- `frondend/` - React (Vite) frontend
 
-## Backend (само endpoints)
+## Реализирано в момента
+- Регистрация: `STUDENT` / `TEACHER`
+- Вход (login с username или email)
+- `GET /api/auth/me`
+- Админ панел (ако влезеш като `ADMIN`)
+- Управление на потребители:
+  - създаване
+  - изтриване
+  - смяна на роля
+  - смяна на парола
+  - активиране/деактивиране
 
-Backend работи с таблица `users` и поддържа:
-- създаване на потребител
-- изтриване на потребител
-- смяна на парола
-- смяна на роля
+## База данни (MAMP/MySQL)
+`users` таблицата се създава автоматично при старт на backend, ако липсва.
 
-### API endpoints
-
-- `GET /api/users`
-- `GET /api/users/{id}`
-- `POST /api/users`
-- `PUT /api/users/{id}/role`
-- `PUT /api/users/{id}/password`
-- `DELETE /api/users/{id}`
+По подразбиране backend е настроен за MAMP:
+- host: `127.0.0.1`
+- port: `3306`
+- database: `testdb`
+- user: `root`
+- password: *(празна)*
 
 ## Стартиране
 
-### 1) Backend
-
+### 1) Backend (Terminal tab 1)
 ```bash
-cd backend
-DB_URL="jdbc:mysql://127.0.0.1:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
+cd "/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend"
+mvn spring-boot:run
+```
+
+Ако получиш `Access denied for user 'root'`:
+```bash
+cd "/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend"
+DB_URL="jdbc:mysql://127.0.0.1:3306/testdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
 DB_USERNAME="root" \
 DB_PASSWORD="" \
 mvn spring-boot:run
 ```
 
-Backend URL:
-- `http://localhost:8081`
-
-### 2) Frontend
-
+### 2) Frontend (Terminal tab 2)
 ```bash
-cd frondend
+cd "/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/frondend"
 npm install
 npm run dev
 ```
 
-Frontend URL:
-- `http://localhost:5173`
+## URLs
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8081`
 
-## Бележки
-
-- В backend **няма** `templates` и няма server-side view rendering.
-- Полето `password_hash` се записва с BCrypt hash.
+## Първи вход
+Ако таблицата `users` е празна, backend създава автоматично admin потребител:
+- username: `admin`
+- password: `admin12345`

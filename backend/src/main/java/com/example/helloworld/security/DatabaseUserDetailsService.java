@@ -1,6 +1,5 @@
 package com.example.helloworld.security;
 
-import com.example.helloworld.repository.UserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -8,6 +7,8 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+
+import com.example.helloworld.repository.UserRepository;
 
 @Service
 public class DatabaseUserDetailsService implements UserDetailsService {
