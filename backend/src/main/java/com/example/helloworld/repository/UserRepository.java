@@ -112,6 +112,30 @@ public class UserRepository {
         return Optional.of(users.get(0));
     }
 
+    public Optional<User> findByLogin(String login) {
+        List<User> users = jdbcTemplate.query(
+                """
+                SELECT id,
+                       COALESCE(NULLIF(username, ''), NULLIF(name, ''), NULLIF(email, ''), CONCAT('user-', id)) AS username,
+                       name,
+                       email,
+                       role,
+                       COALESCE(is_active, 1) AS is_active
+                FROM users
+                WHERE username = ? OR email = ?
+                LIMIT 1
+                """,
+                userRowMapper,
+                login,
+                login
+        );
+
+        if (users.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(users.get(0));
+    }
+
     public Optional<UserAuthData> findAuthByLogin(String login) {
         List<UserAuthData> users = jdbcTemplate.query(
                 """

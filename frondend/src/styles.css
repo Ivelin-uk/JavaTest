@@ -79,6 +79,12 @@ body {
   font-size: 1.1rem;
 }
 
+.auth-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
