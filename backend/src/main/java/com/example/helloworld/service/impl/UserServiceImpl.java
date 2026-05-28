@@ -4,6 +4,7 @@ import com.example.helloworld.exception.DuplicateUserException;
 import com.example.helloworld.exception.UserNotFoundException;
 import com.example.helloworld.model.User;
 import com.example.helloworld.repository.UserRepository;
+import com.example.helloworld.service.AccessControlService;
 import com.example.helloworld.service.UserService;
 import java.util.List;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -15,10 +16,14 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AccessControlService accessControlService;
 
-    public UserServiceImpl(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public UserServiceImpl(UserRepository userRepository,
+                           PasswordEncoder passwordEncoder,
+                           AccessControlService accessControlService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.accessControlService = accessControlService;
     }
 
     @Override
@@ -159,6 +164,9 @@ public class UserServiceImpl implements UserService {
         String normalized = role.trim().toUpperCase();
         if (!normalized.matches("^[A-Z_]{2,30}$")) {
             throw new IllegalArgumentException("Ролята трябва да е 2-30 символа, само главни букви и _.");
+        }
+        if (!accessControlService.isActiveRole(normalized)) {
+            throw new IllegalArgumentException("Ролята не съществува или е неактивна.");
         }
         return normalized;
     }

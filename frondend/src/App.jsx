@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
   `${window.location.protocol}//${window.location.hostname}:8081/api`;
+const AUTH_TOKEN_KEY = "smart_test_auth_token";
 const DEFAULT_ROLES = ["STUDENT", "TEACHER", "ADMIN"];
-const AUTH_TOKEN_KEY = "admin_panel_auth_token";
+const ROLE_ACCESS_KEY_SEPARATOR = "::";
 
 async function request(path, options = {}, authToken) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
@@ -14,12 +15,9 @@ async function request(path, options = {}, authToken) {
 
   let response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      headers
-    });
+    response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   } catch {
-    throw new Error(`Няма връзка с backend-а (${API_BASE_URL}). Стартирай Spring приложението.`);
+    throw new Error(`Няма връзка с backend-а (${API_BASE_URL}).`);
   }
 
   if (response.status === 204) {
@@ -28,19 +26,23 @@ async function request(path, options = {}, authToken) {
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.message || "Грешка при връзка със сървъра.");
+    throw new Error(data?.message || "Грешка при заявка към сървъра.");
   }
-
   return data;
 }
 
+function normalizeRole(role) {
+  return String(role || "").trim().toUpperCase();
+}
+
 export default function App() {
-  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "success" });
+
   const [authToken, setAuthToken] = useState(localStorage.getItem(AUTH_TOKEN_KEY) || "");
   const [currentUser, setCurrentUser] = useState(null);
   const [authView, setAuthView] = useState("register");
+
   const [loginForm, setLoginForm] = useState({ login: "", password: "" });
   const [registerForm, setRegisterForm] = useState({
     username: "",
@@ -49,136 +51,346 @@ export default function App() {
     password: "",
     role: "STUDENT"
   });
-  const [createForm, setCreateForm] = useState({
+
+  const [users, setUsers] = useState([]);
+  const [rolesCatalog, setRolesCatalog] = useState([]);
+  const [accessObjectsCatalog, setAccessObjectsCatalog] = useState([]);
+  const [roleAccessMap, setRoleAccessMap] = useState({});
+  const [createUserForm, setCreateUserForm] = useState({
     username: "",
     name: "",
     email: "",
     password: "",
     role: "STUDENT"
   });
-  const [roleById, setRoleById] = useState({});
-  const [passwordById, setPasswordById] = useState({});
-  const [activeById, setActiveById] = useState({});
+  const [roleByUserId, setRoleByUserId] = useState({});
+  const [passwordByUserId, setPasswordByUserId] = useState({});
+  const [activeByUserId, setActiveByUserId] = useState({});
+
+  const [subjects, setSubjects] = useState([]);
+  const [tests, setTests] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [teacherAssignments, setTeacherAssignments] = useState([]);
+  const [teacherOverview, setTeacherOverview] = useState(null);
+  const [testReportRows, setTestReportRows] = useState([]);
+
+  const [subjectForm, setSubjectForm] = useState({ name: "", description: "" });
+  const [testForm, setTestForm] = useState({ title: "", description: "", subjectId: "", timeLimitMinutes: 30 });
+  const [selectedTestId, setSelectedTestId] = useState("");
+  const [selectedTestDetails, setSelectedTestDetails] = useState(null);
+
+  const [manualQuestionForm, setManualQuestionForm] = useState({
+    questionText: "",
+    points: 1,
+    options: ["", "", "", ""],
+    correctIndex: 0
+  });
+
+  const [aiQuestionForm, setAiQuestionForm] = useState({ topic: "", difficulty: "medium", count: 3 });
+
+  const [groupForm, setGroupForm] = useState({ name: "" });
+  const [memberByGroupId, setMemberByGroupId] = useState({});
+
+  const [assignStudentForm, setAssignStudentForm] = useState({ testId: "", studentId: "", dueAt: "" });
+  const [assignGroupForm, setAssignGroupForm] = useState({ testId: "", groupId: "", dueAt: "" });
+  const [reportTestId, setReportTestId] = useState("");
+
+  const [studentAssignments, setStudentAssignments] = useState([]);
+  const [studentResults, setStudentResults] = useState([]);
+  const [activeAttemptId, setActiveAttemptId] = useState(null);
+  const [currentQuestionPayload, setCurrentQuestionPayload] = useState(null);
+  const [attemptResult, setAttemptResult] = useState(null);
+  const [selectedOptionId, setSelectedOptionId] = useState("");
+  const violationLockRef = useRef(false);
 
   const isAuthenticated = Boolean(authToken);
   const hasMessage = Boolean(message.text);
-  const isAdmin = (currentUser?.role || "").toUpperCase() === "ADMIN";
+  const role = normalizeRole(currentUser?.role);
+  const isAdmin = role === "ADMIN";
+  const isTeacher = role === "TEACHER";
+  const isStudent = role === "STUDENT";
 
-  async function loadUsers(token = authToken) {
-    if (!token) {
-      setUsers([]);
-      return;
-    }
+  const roleOptionsByUser = useMemo(() => {
+    const activeRoleCodes = rolesCatalog
+      .filter((roleEntry) => Boolean(roleEntry.active))
+      .map((roleEntry) => normalizeRole(roleEntry.code))
+      .filter(Boolean);
 
-    setLoading(true);
-    try {
-      const result = await request("/users", {}, token);
-      setUsers(result);
+    const baseRoleOptions = activeRoleCodes.length > 0 ? activeRoleCodes : DEFAULT_ROLES;
+    const map = {};
+    users.forEach((user) => {
+      const currentRole = normalizeRole(roleByUserId[user.id] || user.role || "STUDENT");
+      const options = [...baseRoleOptions];
+      if (!options.includes(currentRole)) {
+        options.push(currentRole);
+      }
+      map[user.id] = options;
+    });
+    return map;
+  }, [users, roleByUserId, rolesCatalog]);
 
-      const nextRoles = {};
-      const nextActive = {};
-      result.forEach((user) => {
-        nextRoles[user.id] = (user.role || "STUDENT").toUpperCase();
-        nextActive[user.id] = Boolean(user.active);
-      });
-
-      setRoleById(nextRoles);
-      setActiveById(nextActive);
-    } catch (error) {
-      setMessage({ text: error.message, type: "error" });
-    } finally {
-      setLoading(false);
-    }
+  function pushMessage(text, type = "success") {
+    setMessage({ text, type });
   }
 
-  async function loadCurrentUser(token) {
+  async function loadCurrentUser(token = authToken) {
     const me = await request("/auth/me", {}, token);
     setCurrentUser(me);
     return me;
   }
 
+  async function loadAdminData(token = authToken) {
+    if (!token) return;
+    const [data, accessConfig] = await Promise.all([
+      request("/users", {}, token),
+      request("/users/access-config", {}, token)
+    ]);
+    setUsers(data);
+
+    const roles = {};
+    const pass = {};
+    const active = {};
+    data.forEach((user) => {
+      roles[user.id] = normalizeRole(user.role || "STUDENT");
+      pass[user.id] = "";
+      active[user.id] = Boolean(user.active);
+    });
+    setRoleByUserId(roles);
+    setPasswordByUserId(pass);
+    setActiveByUserId(active);
+
+    const rolesCatalogData = Array.isArray(accessConfig?.roles) ? accessConfig.roles : [];
+    const accessObjectsData = Array.isArray(accessConfig?.accessObjects) ? accessConfig.accessObjects : [];
+    const roleAccessData = Array.isArray(accessConfig?.roleAccess) ? accessConfig.roleAccess : [];
+
+    setRolesCatalog(rolesCatalogData);
+    setAccessObjectsCatalog(accessObjectsData);
+
+    const matrix = {};
+    roleAccessData.forEach((entry) => {
+      const roleCode = normalizeRole(entry.roleCode);
+      const accessObjectCode = normalizeRole(entry.accessObjectCode);
+      matrix[`${roleCode}${ROLE_ACCESS_KEY_SEPARATOR}${accessObjectCode}`] = Boolean(entry.canView);
+    });
+    setRoleAccessMap(matrix);
+
+    const activeRoleCodes = rolesCatalogData
+      .filter((roleEntry) => Boolean(roleEntry.active))
+      .map((roleEntry) => normalizeRole(roleEntry.code))
+      .filter(Boolean);
+
+    setCreateUserForm((prev) => ({
+      ...prev,
+      role: activeRoleCodes.includes(normalizeRole(prev.role))
+        ? normalizeRole(prev.role)
+        : activeRoleCodes[0] || "STUDENT"
+    }));
+  }
+
+  async function loadTeacherData(token = authToken) {
+    if (!token) return;
+    const [subjectsData, testsData, groupsData, studentsData, assignmentsData, overviewData] = await Promise.all([
+      request("/teacher/subjects", {}, token),
+      request("/teacher/tests", {}, token),
+      request("/teacher/groups", {}, token),
+      request("/teacher/students", {}, token),
+      request("/teacher/assignments", {}, token),
+      request("/teacher/reports/overview", {}, token)
+    ]);
+
+    setSubjects(subjectsData);
+    setTests(testsData);
+    setGroups(groupsData);
+    setStudents(studentsData);
+    setTeacherAssignments(assignmentsData);
+    setTeacherOverview(overviewData);
+
+    if (!selectedTestId && testsData.length > 0) {
+      setSelectedTestId(String(testsData[0].id));
+    }
+    if (!assignStudentForm.testId && testsData.length > 0) {
+      setAssignStudentForm((prev) => ({ ...prev, testId: String(testsData[0].id) }));
+    }
+    if (!assignGroupForm.testId && testsData.length > 0) {
+      setAssignGroupForm((prev) => ({ ...prev, testId: String(testsData[0].id) }));
+    }
+    if (!assignGroupForm.groupId && groupsData.length > 0) {
+      setAssignGroupForm((prev) => ({ ...prev, groupId: String(groupsData[0].id) }));
+    }
+    if (!assignStudentForm.studentId && studentsData.length > 0) {
+      setAssignStudentForm((prev) => ({ ...prev, studentId: String(studentsData[0].id) }));
+    }
+  }
+
+  async function loadStudentData(token = authToken) {
+    if (!token) return;
+    const [assignments, results] = await Promise.all([
+      request("/student/assignments", {}, token),
+      request("/student/results", {}, token)
+    ]);
+    setStudentAssignments(assignments);
+    setStudentResults(results);
+  }
+
   useEffect(() => {
     let active = true;
 
-    async function initializeSession() {
+    async function initialize() {
       if (!authToken) {
         setCurrentUser(null);
-        setUsers([]);
         return;
       }
 
       setLoading(true);
       try {
         const me = await loadCurrentUser(authToken);
-        if (!active) {
-          return;
-        }
+        if (!active) return;
 
-        if ((me.role || "").toUpperCase() === "ADMIN") {
-          await loadUsers(authToken);
-        } else {
-          setUsers([]);
-          setRoleById({});
-          setPasswordById({});
-          setActiveById({});
+        const meRole = normalizeRole(me.role);
+        if (meRole === "ADMIN") {
+          await loadAdminData(authToken);
+        } else if (meRole === "TEACHER") {
+          await loadTeacherData(authToken);
+        } else if (meRole === "STUDENT") {
+          await loadStudentData(authToken);
         }
       } catch (error) {
-        if (!active) {
-          return;
-        }
-        setMessage({ text: error.message, type: "error" });
+        if (!active) return;
+        pushMessage(error.message, "error");
         handleLogout();
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
-    initializeSession();
+    initialize();
     return () => {
       active = false;
     };
   }, [authToken]);
 
-  const roleOptionsByUser = useMemo(() => {
-    const map = {};
-    users.forEach((user) => {
-      const role = (roleById[user.id] || "STUDENT").toUpperCase();
-      const options = [...DEFAULT_ROLES];
-      if (!options.includes(role)) {
-        options.push(role);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSelectedTest() {
+      if (!isTeacher || !selectedTestId) {
+        setSelectedTestDetails(null);
+        return;
       }
-      map[user.id] = options;
-    });
-    return map;
-  }, [users, roleById]);
+
+      try {
+        const details = await request(`/teacher/tests/${selectedTestId}`, {}, authToken);
+        if (!cancelled) {
+          setSelectedTestDetails(details);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          pushMessage(error.message, "error");
+        }
+      }
+    }
+
+    loadSelectedTest();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTeacher, selectedTestId, authToken]);
+
+  useEffect(() => {
+    if (!isStudent || !activeAttemptId || !currentQuestionPayload || currentQuestionPayload.completed) {
+      return;
+    }
+
+    const onViolationEvent = async (reason) => {
+      if (violationLockRef.current) return;
+      violationLockRef.current = true;
+      try {
+        const payload = await request(
+          `/student/attempts/${activeAttemptId}/violation`,
+          {
+            method: "POST",
+            body: JSON.stringify({ reason })
+          },
+          authToken
+        );
+        applyAttemptPayload(payload, "Нарушение отчетено: " + reason);
+      } catch (error) {
+        pushMessage(error.message, "error");
+      } finally {
+        setTimeout(() => {
+          violationLockRef.current = false;
+        }, 400);
+      }
+    };
+
+    const visibilityHandler = () => {
+      if (document.hidden) {
+        onViolationEvent("TAB_SWITCH");
+      }
+    };
+
+    const blurHandler = () => {
+      onViolationEvent("WINDOW_BLUR");
+    };
+
+    document.addEventListener("visibilitychange", visibilityHandler);
+    window.addEventListener("blur", blurHandler);
+
+    return () => {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      window.removeEventListener("blur", blurHandler);
+    };
+  }, [isStudent, activeAttemptId, currentQuestionPayload, authToken]);
+
+  function handleLogout() {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    setAuthToken("");
+    setCurrentUser(null);
+
+    setUsers([]);
+    setRolesCatalog([]);
+    setAccessObjectsCatalog([]);
+    setRoleAccessMap({});
+    setSubjects([]);
+    setTests([]);
+    setGroups([]);
+    setStudents([]);
+    setTeacherAssignments([]);
+    setTeacherOverview(null);
+    setTestReportRows([]);
+    setSelectedTestId("");
+    setSelectedTestDetails(null);
+
+    setStudentAssignments([]);
+    setStudentResults([]);
+    setActiveAttemptId(null);
+    setCurrentQuestionPayload(null);
+    setAttemptResult(null);
+    setSelectedOptionId("");
+  }
 
   async function handleLogin(event) {
     event.preventDefault();
     try {
       const result = await request("/auth/login", {
         method: "POST",
-        body: JSON.stringify({
-          login: loginForm.login,
-          password: loginForm.password
-        })
+        body: JSON.stringify(loginForm)
       });
 
       localStorage.setItem(AUTH_TOKEN_KEY, result.token);
       setAuthToken(result.token);
       setCurrentUser(result.user || null);
       setLoginForm({ login: "", password: "" });
-      setMessage({ text: result.message || "Успешен вход.", type: "success" });
+      pushMessage(result.message || "Успешен вход.", "success");
     } catch (error) {
-      setMessage({ text: error.message, type: "error" });
+      pushMessage(error.message, "error");
     }
   }
 
   async function handleRegister(event) {
     event.preventDefault();
     const draft = { ...registerForm };
-
     try {
       await request("/auth/register", {
         method: "POST",
@@ -188,443 +400,466 @@ export default function App() {
       setRegisterForm({ username: "", name: "", email: "", password: "", role: "STUDENT" });
       setLoginForm({ login: draft.username, password: draft.password });
       setAuthView("login");
-      setMessage({
-        text: "Регистрацията е успешна. Можеш да влезеш със същите данни.",
-        type: "success"
-      });
+      pushMessage("Регистрацията е успешна. Можеш да влезеш.", "success");
     } catch (error) {
-      setMessage({ text: error.message, type: "error" });
+      pushMessage(error.message, "error");
     }
   }
 
-  function handleLogout() {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-    setAuthToken("");
-    setCurrentUser(null);
-    setUsers([]);
-    setRoleById({});
-    setPasswordById({});
-    setActiveById({});
-  }
-
-  async function handleCreateUser(event) {
+  async function handleAdminCreateUser(event) {
     event.preventDefault();
     try {
-      await request(
-        "/users",
-        {
-          method: "POST",
-          body: JSON.stringify(createForm)
-        },
-        authToken
-      );
-
-      setCreateForm({
+      await request("/users", { method: "POST", body: JSON.stringify(createUserForm) }, authToken);
+      const activeRoleCodes = rolesCatalog
+        .filter((roleEntry) => Boolean(roleEntry.active))
+        .map((roleEntry) => normalizeRole(roleEntry.code))
+        .filter(Boolean);
+      setCreateUserForm({
         username: "",
         name: "",
         email: "",
         password: "",
-        role: "STUDENT"
+        role: activeRoleCodes[0] || "STUDENT"
       });
-      setMessage({ text: "Потребителят е създаден успешно.", type: "success" });
-      await loadUsers();
+      await loadAdminData();
+      pushMessage("Потребителят е създаден.", "success");
     } catch (error) {
-      setMessage({ text: error.message, type: "error" });
+      pushMessage(error.message, "error");
     }
   }
 
-  async function handleUpdateRole(userId) {
+  async function handleAdminUpdateRole(userId) {
     try {
       await request(
         `/users/${userId}/role`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ role: roleById[userId] || "STUDENT" })
-        },
+        { method: "PUT", body: JSON.stringify({ role: roleByUserId[userId] || "STUDENT" }) },
         authToken
       );
-      setMessage({ text: "Ролята е обновена успешно.", type: "success" });
-      await loadUsers();
+      await loadAdminData();
+      pushMessage("Ролята е обновена.", "success");
     } catch (error) {
-      setMessage({ text: error.message, type: "error" });
+      pushMessage(error.message, "error");
     }
   }
 
-  async function handleUpdatePassword(userId) {
-    const password = passwordById[userId] || "";
+  async function handleAdminUpdatePassword(userId) {
+    const password = passwordByUserId[userId] || "";
     if (!password.trim()) {
-      setMessage({ text: "Въведи нова парола.", type: "error" });
+      pushMessage("Въведи нова парола.", "error");
       return;
     }
 
     try {
-      await request(
-        `/users/${userId}/password`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ password })
-        },
-        authToken
-      );
-      setPasswordById((prev) => ({ ...prev, [userId]: "" }));
-      setMessage({ text: "Паролата е обновена успешно.", type: "success" });
-      await loadUsers();
+      await request(`/users/${userId}/password`, { method: "PUT", body: JSON.stringify({ password }) }, authToken);
+      await loadAdminData();
+      pushMessage("Паролата е сменена.", "success");
     } catch (error) {
-      setMessage({ text: error.message, type: "error" });
+      pushMessage(error.message, "error");
     }
   }
 
-  async function handleToggleActivation(userId) {
-    const currentActive = Boolean(activeById[userId]);
-    const nextActive = !currentActive;
+  async function handleAdminToggleActive(userId) {
+    const nextActive = !Boolean(activeByUserId[userId]);
     try {
       await request(
         `/users/${userId}/activation`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ active: nextActive })
-        },
+        { method: "PUT", body: JSON.stringify({ active: nextActive }) },
         authToken
       );
-      setMessage({
-        text: nextActive ? "Потребителят е активиран." : "Потребителят е деактивиран.",
-        type: "success"
-      });
-      await loadUsers();
+      await loadAdminData();
+      pushMessage(nextActive ? "Потребителят е активиран." : "Потребителят е деактивиран.", "success");
     } catch (error) {
-      setMessage({ text: error.message, type: "error" });
+      pushMessage(error.message, "error");
     }
   }
 
-  async function handleDeleteUser(userId) {
-    if (!window.confirm("Сигурен ли си, че искаш да изтриеш този потребител?")) {
+  async function handleAdminDeleteUser(userId) {
+    if (!window.confirm("Сигурен ли си, че искаш да изтриеш потребителя?")) return;
+    try {
+      await request(`/users/${userId}`, { method: "DELETE" }, authToken);
+      await loadAdminData();
+      pushMessage("Потребителят е изтрит.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  function roleAccessKey(roleCode, accessObjectCode) {
+    return `${normalizeRole(roleCode)}${ROLE_ACCESS_KEY_SEPARATOR}${normalizeRole(accessObjectCode)}`;
+  }
+
+  async function handleRoleAccessToggle(roleCode, accessObjectCode, nextCanView) {
+    try {
+      await request(
+        "/users/access-config/role-access",
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            roleCode: normalizeRole(roleCode),
+            accessObjectCode: normalizeRole(accessObjectCode),
+            canView: nextCanView
+          })
+        },
+        authToken
+      );
+
+      setRoleAccessMap((prev) => ({
+        ...prev,
+        [roleAccessKey(roleCode, accessObjectCode)]: Boolean(nextCanView)
+      }));
+      pushMessage("Правата са обновени.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleRoleActivation(roleCode, nextActive) {
+    try {
+      await request(
+        `/users/roles/${encodeURIComponent(roleCode)}/activation`,
+        { method: "PUT", body: JSON.stringify({ active: nextActive }) },
+        authToken
+      );
+      await loadAdminData();
+      pushMessage(nextActive ? "Ролята е активирана." : "Ролята е деактивирана.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleCreateSubject(event) {
+    event.preventDefault();
+    try {
+      await request("/teacher/subjects", { method: "POST", body: JSON.stringify(subjectForm) }, authToken);
+      setSubjectForm({ name: "", description: "" });
+      await loadTeacherData();
+      pushMessage("Предметът е създаден.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleCreateTest(event) {
+    event.preventDefault();
+    try {
+      const payload = {
+        ...testForm,
+        subjectId: Number(testForm.subjectId),
+        timeLimitMinutes: Number(testForm.timeLimitMinutes)
+      };
+      const created = await request("/teacher/tests", { method: "POST", body: JSON.stringify(payload) }, authToken);
+      await loadTeacherData();
+      setSelectedTestId(String(created.id));
+      pushMessage("Тестът е създаден.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleDeleteTest(testId) {
+    if (!window.confirm("Изтриване на теста?")) return;
+    try {
+      await request(`/teacher/tests/${testId}`, { method: "DELETE" }, authToken);
+      await loadTeacherData();
+      if (String(testId) === selectedTestId) {
+        setSelectedTestId("");
+        setSelectedTestDetails(null);
+      }
+      pushMessage("Тестът е изтрит.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleAddManualQuestion(event) {
+    event.preventDefault();
+    if (!selectedTestId) {
+      pushMessage("Избери тест.", "error");
+      return;
+    }
+
+    const options = manualQuestionForm.options
+      .map((text, index) => ({ text: text.trim(), correct: index === Number(manualQuestionForm.correctIndex) }))
+      .filter((item) => item.text.length > 0);
+
+    if (options.length < 2) {
+      pushMessage("Добави поне 2 отговора.", "error");
       return;
     }
 
     try {
-      await request(`/users/${userId}`, { method: "DELETE" }, authToken);
-      setMessage({ text: "Потребителят е изтрит успешно.", type: "success" });
-      await loadUsers();
+      const response = await request(
+        `/teacher/tests/${selectedTestId}/questions/manual`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            questionText: manualQuestionForm.questionText,
+            points: Number(manualQuestionForm.points),
+            options
+          })
+        },
+        authToken
+      );
+
+      setSelectedTestDetails(response.test);
+      setManualQuestionForm({ questionText: "", points: 1, options: ["", "", "", ""], correctIndex: 0 });
+      await loadTeacherData();
+      pushMessage("Въпросът е добавен.", "success");
     } catch (error) {
-      setMessage({ text: error.message, type: "error" });
+      pushMessage(error.message, "error");
     }
   }
 
-  return (
-    <main className="layout">
-      <header className="hero">
-        <p className="badge">Frontend MVC (React)</p>
-        <h1>Система за тестове</h1>
-        <p className="subtitle">
-          Начална страница: Регистрация. Можеш да се регистрираш като Учител или Ученик.
-        </p>
-      </header>
+  async function handleGenerateAiQuestions(event) {
+    event.preventDefault();
+    if (!selectedTestId) {
+      pushMessage("Избери тест.", "error");
+      return;
+    }
 
-      {!isAuthenticated ? (
-        <>
+    try {
+      const response = await request(
+        `/teacher/tests/${selectedTestId}/questions/ai`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            topic: aiQuestionForm.topic,
+            difficulty: aiQuestionForm.difficulty,
+            count: Number(aiQuestionForm.count)
+          })
+        },
+        authToken
+      );
+
+      setSelectedTestDetails(response.test);
+      await loadTeacherData();
+      pushMessage(response.message || "AI въпроси са добавени.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleDeleteQuestion(questionId) {
+    if (!window.confirm("Изтриване на въпроса?")) return;
+    try {
+      await request(`/teacher/questions/${questionId}`, { method: "DELETE" }, authToken);
+      const refreshed = await request(`/teacher/tests/${selectedTestId}`, {}, authToken);
+      setSelectedTestDetails(refreshed);
+      await loadTeacherData();
+      pushMessage("Въпросът е изтрит.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleCreateGroup(event) {
+    event.preventDefault();
+    try {
+      await request("/teacher/groups", { method: "POST", body: JSON.stringify(groupForm) }, authToken);
+      setGroupForm({ name: "" });
+      await loadTeacherData();
+      pushMessage("Групата е създадена.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleAddMember(groupId) {
+    const studentId = Number(memberByGroupId[groupId]);
+    if (!studentId) {
+      pushMessage("Избери ученик.", "error");
+      return;
+    }
+
+    try {
+      await request(
+        `/teacher/groups/${groupId}/members`,
+        { method: "POST", body: JSON.stringify({ studentId }) },
+        authToken
+      );
+      await loadTeacherData();
+      pushMessage("Ученикът е добавен в групата.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleRemoveMember(groupId, studentId) {
+    try {
+      await request(`/teacher/groups/${groupId}/members/${studentId}`, { method: "DELETE" }, authToken);
+      await loadTeacherData();
+      pushMessage("Ученикът е премахнат от групата.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleAssignToStudent(event) {
+    event.preventDefault();
+    try {
+      await request(
+        "/teacher/assignments/student",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            testId: Number(assignStudentForm.testId),
+            studentId: Number(assignStudentForm.studentId),
+            dueAt: assignStudentForm.dueAt || null
+          })
+        },
+        authToken
+      );
+      await loadTeacherData();
+      pushMessage("Тестът е зададен на ученик.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleAssignToGroup(event) {
+    event.preventDefault();
+    try {
+      await request(
+        "/teacher/assignments/group",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            testId: Number(assignGroupForm.testId),
+            groupId: Number(assignGroupForm.groupId),
+            dueAt: assignGroupForm.dueAt || null
+          })
+        },
+        authToken
+      );
+      await loadTeacherData();
+      pushMessage("Тестът е зададен към групата.", "success");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleLoadReportByTest() {
+    if (!reportTestId) {
+      pushMessage("Избери тест за справката.", "error");
+      return;
+    }
+
+    try {
+      const rows = await request(`/teacher/reports/tests/${reportTestId}`, {}, authToken);
+      setTestReportRows(rows);
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  function applyAttemptPayload(payload, successMessage = "") {
+    if (payload?.completed === false) {
+      setCurrentQuestionPayload(payload);
+      setSelectedOptionId("");
+      if (successMessage) {
+        pushMessage(successMessage, "success");
+      }
+      return;
+    }
+
+    if (payload?.completed === true && payload.result) {
+      setCurrentQuestionPayload(payload);
+      setAttemptResult(payload.result);
+      setSelectedOptionId("");
+      loadStudentData();
+      if (successMessage) {
+        pushMessage(successMessage, "success");
+      }
+      return;
+    }
+
+    if (payload?.answers) {
+      setAttemptResult(payload);
+      setCurrentQuestionPayload({ completed: true, result: payload });
+      setSelectedOptionId("");
+      loadStudentData();
+      if (successMessage) {
+        pushMessage(successMessage, "success");
+      }
+      return;
+    }
+
+    pushMessage("Неочакван формат на отговор от сървъра.", "error");
+  }
+
+  async function handleStartAttempt(assignmentId) {
+    try {
+      const started = await request(`/student/attempts/${assignmentId}/start`, { method: "POST" }, authToken);
+      setActiveAttemptId(started.attemptId);
+      setAttemptResult(null);
+      applyAttemptPayload(started.current, "Тестът е стартиран.");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleSubmitStudentAnswer() {
+    if (!activeAttemptId) return;
+
+    try {
+      const payload = await request(
+        `/student/attempts/${activeAttemptId}/answer`,
+        {
+          method: "POST",
+          body: JSON.stringify({ optionId: selectedOptionId ? Number(selectedOptionId) : null })
+        },
+        authToken
+      );
+
+      applyAttemptPayload(payload, "Отговорът е записан.");
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  async function handleFinishAttemptAndRefresh() {
+    if (!activeAttemptId) return;
+    try {
+      const result = await request(`/student/attempts/${activeAttemptId}/result`, {}, authToken);
+      setAttemptResult(result);
+      setCurrentQuestionPayload({ completed: true, result });
+      await loadStudentData();
+    } catch (error) {
+      pushMessage(error.message, "error");
+    }
+  }
+
+  function renderAuth() {
+    return (
+      <>
+        <section className="panel">
+          <div className="auth-tabs">
+            <button
+              type="button"
+              className={`btn ${authView === "register" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setAuthView("register")}
+            >
+              Регистрация
+            </button>
+            <button
+              type="button"
+              className={`btn ${authView === "login" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setAuthView("login")}
+            >
+              Вход
+            </button>
+          </div>
+        </section>
+
+        {authView === "register" ? (
           <section className="panel">
-            <div className="auth-tabs">
-              <button
-                type="button"
-                className={`btn ${authView === "register" ? "btn-primary" : "btn-ghost"}`}
-                onClick={() => setAuthView("register")}
-              >
-                Регистрация
-              </button>
-              <button
-                type="button"
-                className={`btn ${authView === "login" ? "btn-primary" : "btn-ghost"}`}
-                onClick={() => setAuthView("login")}
-              >
-                Вход
-              </button>
-            </div>
-          </section>
-
-          {authView === "register" ? (
-            <section className="panel">
-              <h2>Регистрация</h2>
-              <form className="form-grid" onSubmit={handleRegister}>
-                <input
-                  type="text"
-                  placeholder="Username"
-                  value={registerForm.username}
-                  onChange={(event) =>
-                    setRegisterForm((prev) => ({ ...prev, username: event.target.value }))
-                  }
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="Име"
-                  value={registerForm.name}
-                  onChange={(event) => setRegisterForm((prev) => ({ ...prev, name: event.target.value }))}
-                  required
-                />
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={registerForm.email}
-                  onChange={(event) =>
-                    setRegisterForm((prev) => ({ ...prev, email: event.target.value }))
-                  }
-                  required
-                />
-                <input
-                  type="password"
-                  placeholder="Парола (мин. 6)"
-                  value={registerForm.password}
-                  onChange={(event) =>
-                    setRegisterForm((prev) => ({ ...prev, password: event.target.value }))
-                  }
-                  required
-                />
-                <select
-                  value={registerForm.role}
-                  onChange={(event) =>
-                    setRegisterForm((prev) => ({ ...prev, role: event.target.value }))
-                  }
-                >
-                  <option value="STUDENT">STUDENT (Ученик)</option>
-                  <option value="TEACHER">TEACHER (Учител)</option>
-                </select>
-                <button type="submit" className="btn btn-primary">
-                  Регистрирай
-                </button>
-              </form>
-            </section>
-          ) : (
-            <section className="panel">
-              <h2>Вход</h2>
-              <form className="form-grid" onSubmit={handleLogin}>
-                <input
-                  type="text"
-                  placeholder="Username или Email"
-                  value={loginForm.login}
-                  onChange={(event) => setLoginForm((prev) => ({ ...prev, login: event.target.value }))}
-                  required
-                />
-                <input
-                  type="password"
-                  placeholder="Парола"
-                  value={loginForm.password}
-                  onChange={(event) =>
-                    setLoginForm((prev) => ({ ...prev, password: event.target.value }))
-                  }
-                  required
-                />
-                <button type="submit" className="btn btn-primary">
-                  Вход
-                </button>
-              </form>
-            </section>
-          )}
-        </>
-      ) : isAdmin ? (
-        <>
-          <section className="panel">
-            <div className="panel-title">
-              <h2>
-                Администраторски панел
-                {currentUser ? ` (влязъл: ${currentUser.username}, роля: ${currentUser.role})` : ""}
-              </h2>
-              <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-                Изход
-              </button>
-            </div>
-            <form className="form-grid" onSubmit={handleCreateUser}>
-              <input
-                name="username"
-                type="text"
-                placeholder="Username"
-                value={createForm.username}
-                onChange={(event) =>
-                  setCreateForm((prev) => ({ ...prev, username: event.target.value }))
-                }
-                required
-              />
-              <input
-                name="name"
-                type="text"
-                placeholder="Име"
-                value={createForm.name}
-                onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))}
-                required
-              />
-              <input
-                name="email"
-                type="email"
-                placeholder="Email"
-                value={createForm.email}
-                onChange={(event) => setCreateForm((prev) => ({ ...prev, email: event.target.value }))}
-                required
-              />
-              <input
-                name="password"
-                type="password"
-                placeholder="Парола (мин. 6)"
-                value={createForm.password}
-                onChange={(event) =>
-                  setCreateForm((prev) => ({ ...prev, password: event.target.value }))
-                }
-                required
-              />
-              <select
-                name="role"
-                value={createForm.role}
-                onChange={(event) => setCreateForm((prev) => ({ ...prev, role: event.target.value }))}
-              >
-                {DEFAULT_ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-              <button type="submit" className="btn btn-primary">
-                Създай
-              </button>
-            </form>
-          </section>
-
-          <section className="panel">
-            <div className="panel-title">
-              <h2>Потребители</h2>
-              <button className="btn btn-ghost" type="button" onClick={() => loadUsers()}>
-                {loading ? "Зарежда..." : "Обнови"}
-              </button>
-            </div>
-
-            {hasMessage ? <p className={`message ${message.type}`}>{message.text}</p> : null}
-
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Username</th>
-                    <th>Име</th>
-                    <th>Email</th>
-                    <th>Роля</th>
-                    <th>Статус</th>
-                    <th>Парола</th>
-                    <th>Изтриване</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.length === 0 ? (
-                    <tr>
-                      <td colSpan="8">Няма потребители в таблицата users.</td>
-                    </tr>
-                  ) : (
-                    users.map((user) => {
-                      const isActive = Boolean(activeById[user.id]);
-                      return (
-                        <tr key={user.id}>
-                          <td>{user.id}</td>
-                          <td>{user.username || ""}</td>
-                          <td>{user.name || ""}</td>
-                          <td>{user.email || ""}</td>
-                          <td>
-                            <div className="row-controls">
-                              <select
-                                value={roleById[user.id] || "STUDENT"}
-                                onChange={(event) =>
-                                  setRoleById((prev) => ({
-                                    ...prev,
-                                    [user.id]: event.target.value
-                                  }))
-                                }
-                              >
-                                {(roleOptionsByUser[user.id] || DEFAULT_ROLES).map((role) => (
-                                  <option key={role} value={role}>
-                                    {role}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                onClick={() => handleUpdateRole(user.id)}
-                              >
-                                Запази
-                              </button>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="row-controls">
-                              <span className={isActive ? "status-active" : "status-inactive"}>
-                                {isActive ? "Активен" : "Неактивен"}
-                              </span>
-                              <button
-                                type="button"
-                                className={`btn ${isActive ? "btn-danger" : "btn-primary"}`}
-                                onClick={() => handleToggleActivation(user.id)}
-                              >
-                                {isActive ? "Деактивирай" : "Активирай"}
-                              </button>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="row-controls">
-                              <input
-                                type="password"
-                                placeholder="Нова парола"
-                                value={passwordById[user.id] || ""}
-                                onChange={(event) =>
-                                  setPasswordById((prev) => ({
-                                    ...prev,
-                                    [user.id]: event.target.value
-                                  }))
-                                }
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                onClick={() => handleUpdatePassword(user.id)}
-                              >
-                                Смени
-                              </button>
-                            </div>
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-danger"
-                              onClick={() => handleDeleteUser(user.id)}
-                            >
-                              Изтрий
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </>
-      ) : (
-        <>
-          <section className="panel">
-            <div className="panel-title">
-              <h2>
-                Страница за регистриране
-                {currentUser ? ` (влязъл: ${currentUser.username}, роля: ${currentUser.role})` : ""}
-              </h2>
-              <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-                Изход
-              </button>
-            </div>
-            <p className="subtitle">След вход можеш да регистрираш нов потребител като Учител или Ученик.</p>
+            <h2>Регистрация</h2>
             <form className="form-grid" onSubmit={handleRegister}>
               <input
                 type="text"
                 placeholder="Username"
                 value={registerForm.username}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({ ...prev, username: event.target.value }))
-                }
+                onChange={(event) => setRegisterForm((prev) => ({ ...prev, username: event.target.value }))}
                 required
               />
               <input
@@ -638,36 +873,1073 @@ export default function App() {
                 type="email"
                 placeholder="Email"
                 value={registerForm.email}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({ ...prev, email: event.target.value }))
-                }
+                onChange={(event) => setRegisterForm((prev) => ({ ...prev, email: event.target.value }))}
                 required
               />
               <input
                 type="password"
                 placeholder="Парола (мин. 6)"
                 value={registerForm.password}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({ ...prev, password: event.target.value }))
-                }
+                onChange={(event) => setRegisterForm((prev) => ({ ...prev, password: event.target.value }))}
                 required
               />
               <select
                 value={registerForm.role}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({ ...prev, role: event.target.value }))
-                }
+                onChange={(event) => setRegisterForm((prev) => ({ ...prev, role: event.target.value }))}
               >
                 <option value="STUDENT">STUDENT (Ученик)</option>
-                <option value="TEACHER">TEACHER (Учител)</option>
+                <option value="TEACHER">TEACHER (Преподавател)</option>
               </select>
               <button type="submit" className="btn btn-primary">
                 Регистрирай
               </button>
             </form>
           </section>
-        </>
-      )}
+        ) : (
+          <section className="panel">
+            <h2>Вход</h2>
+            <form className="form-grid" onSubmit={handleLogin}>
+              <input
+                type="text"
+                placeholder="Username или Email"
+                value={loginForm.login}
+                onChange={(event) => setLoginForm((prev) => ({ ...prev, login: event.target.value }))}
+                required
+              />
+              <input
+                type="password"
+                placeholder="Парола"
+                value={loginForm.password}
+                onChange={(event) => setLoginForm((prev) => ({ ...prev, password: event.target.value }))}
+                required
+              />
+              <button type="submit" className="btn btn-primary">
+                Вход
+              </button>
+            </form>
+          </section>
+        )}
+      </>
+    );
+  }
+
+  function renderAdminPanel() {
+    const activeRoleOptions = rolesCatalog
+      .filter((roleEntry) => Boolean(roleEntry.active))
+      .map((roleEntry) => normalizeRole(roleEntry.code))
+      .filter(Boolean);
+    const effectiveRoleOptions = activeRoleOptions.length > 0 ? activeRoleOptions : DEFAULT_ROLES;
+
+    return (
+      <>
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Администраторски панел</h2>
+            <button type="button" className="btn btn-ghost" onClick={handleLogout}>
+              Изход
+            </button>
+          </div>
+
+          <form className="form-grid" onSubmit={handleAdminCreateUser}>
+            <input
+              type="text"
+              placeholder="Username"
+              value={createUserForm.username}
+              onChange={(event) => setCreateUserForm((prev) => ({ ...prev, username: event.target.value }))}
+              required
+            />
+            <input
+              type="text"
+              placeholder="Име"
+              value={createUserForm.name}
+              onChange={(event) => setCreateUserForm((prev) => ({ ...prev, name: event.target.value }))}
+              required
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={createUserForm.email}
+              onChange={(event) => setCreateUserForm((prev) => ({ ...prev, email: event.target.value }))}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Парола"
+              value={createUserForm.password}
+              onChange={(event) => setCreateUserForm((prev) => ({ ...prev, password: event.target.value }))}
+              required
+            />
+            <select
+              value={createUserForm.role}
+              onChange={(event) => setCreateUserForm((prev) => ({ ...prev, role: event.target.value }))}
+            >
+              {effectiveRoleOptions.map((entry) => (
+                <option key={entry} value={entry}>
+                  {entry}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="btn btn-primary">
+              Създай
+            </button>
+          </form>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Потребители</h2>
+            <button className="btn btn-ghost" type="button" onClick={() => loadAdminData()}>
+              Обнови
+            </button>
+          </div>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Username</th>
+                  <th>Име</th>
+                  <th>Email</th>
+                  <th>Роля</th>
+                  <th>Статус</th>
+                  <th>Парола</th>
+                  <th>Изтриване</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.length === 0 ? (
+                  <tr>
+                    <td colSpan="8">Няма потребители.</td>
+                  </tr>
+                ) : (
+                  users.map((user) => {
+                    const isActive = Boolean(activeByUserId[user.id]);
+                    return (
+                      <tr key={user.id}>
+                        <td>{user.id}</td>
+                        <td>{user.username}</td>
+                        <td>{user.name}</td>
+                        <td>{user.email}</td>
+                        <td>
+                          <div className="row-controls">
+                            <select
+                              value={roleByUserId[user.id] || "STUDENT"}
+                              onChange={(event) =>
+                                setRoleByUserId((prev) => ({ ...prev, [user.id]: event.target.value }))
+                              }
+                            >
+                              {(roleOptionsByUser[user.id] || DEFAULT_ROLES).map((entry) => (
+                                <option key={entry} value={entry}>
+                                  {entry}
+                                </option>
+                              ))}
+                            </select>
+                            <button className="btn btn-primary" type="button" onClick={() => handleAdminUpdateRole(user.id)}>
+                              Запази
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="row-controls">
+                            <span className={isActive ? "status-active" : "status-inactive"}>
+                              {isActive ? "Активен" : "Неактивен"}
+                            </span>
+                            <button
+                              className={`btn ${isActive ? "btn-danger" : "btn-primary"}`}
+                              type="button"
+                              onClick={() => handleAdminToggleActive(user.id)}
+                            >
+                              {isActive ? "Деактивирай" : "Активирай"}
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="row-controls">
+                            <input
+                              type="password"
+                              placeholder="Нова парола"
+                              value={passwordByUserId[user.id] || ""}
+                              onChange={(event) =>
+                                setPasswordByUserId((prev) => ({ ...prev, [user.id]: event.target.value }))
+                              }
+                            />
+                            <button className="btn btn-primary" type="button" onClick={() => handleAdminUpdatePassword(user.id)}>
+                              Смени
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <button className="btn btn-danger" type="button" onClick={() => handleAdminDeleteUser(user.id)}>
+                            Изтрий
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Роли (номенклатура)</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Код</th>
+                  <th>Име</th>
+                  <th>Описание</th>
+                  <th>Статус</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rolesCatalog.length === 0 ? (
+                  <tr>
+                    <td colSpan="5">Няма роли.</td>
+                  </tr>
+                ) : (
+                  rolesCatalog.map((entry) => {
+                    const active = Boolean(entry.active);
+                    const roleCode = normalizeRole(entry.code);
+                    const canToggle = roleCode !== "ADMIN";
+                    return (
+                      <tr key={roleCode}>
+                        <td>{roleCode}</td>
+                        <td>{entry.name}</td>
+                        <td>{entry.description || "-"}</td>
+                        <td>
+                          <span className={active ? "status-active" : "status-inactive"}>
+                            {active ? "Активна" : "Неактивна"}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className={`btn ${active ? "btn-danger" : "btn-primary"}`}
+                            type="button"
+                            disabled={!canToggle}
+                            onClick={() => handleRoleActivation(roleCode, !active)}
+                          >
+                            {active ? "Деактивирай" : "Активирай"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Матрица за достъп (Role -&gt; Controller)</h2>
+          <p className="subtitle">
+            Управлява видимостта на контролерите чрез таблицата <code>role_access</code>.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Роля</th>
+                  {accessObjectsCatalog.map((accessObject) => (
+                    <th key={accessObject.code}>{accessObject.code}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rolesCatalog.length === 0 || accessObjectsCatalog.length === 0 ? (
+                  <tr>
+                    <td colSpan={Math.max(2, accessObjectsCatalog.length + 1)}>
+                      Няма конфигурирани роли или обекти за достъп.
+                    </td>
+                  </tr>
+                ) : (
+                  rolesCatalog.map((roleEntry) => {
+                    const roleCode = normalizeRole(roleEntry.code);
+                    return (
+                      <tr key={roleCode}>
+                        <td>{roleCode}</td>
+                        {accessObjectsCatalog.map((accessObject) => {
+                          const accessObjectCode = normalizeRole(accessObject.code);
+                          const key = roleAccessKey(roleCode, accessObjectCode);
+                          const checked = Boolean(roleAccessMap[key]);
+                          return (
+                            <td key={accessObjectCode}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) =>
+                                  handleRoleAccessToggle(roleCode, accessObjectCode, event.target.checked)
+                                }
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  function renderTeacherPanel() {
+    return (
+      <>
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Teacher панел</h2>
+            <button type="button" className="btn btn-ghost" onClick={handleLogout}>
+              Изход
+            </button>
+          </div>
+          <p className="subtitle">
+            Създаване на предмети/тестове, ръчно и AI добавяне на въпроси, задаване към ученик/група и справки.
+          </p>
+        </section>
+
+        <section className="panel">
+          <h2>Предмети</h2>
+          <form className="form-grid" onSubmit={handleCreateSubject}>
+            <input
+              type="text"
+              placeholder="Име на предмет"
+              value={subjectForm.name}
+              onChange={(event) => setSubjectForm((prev) => ({ ...prev, name: event.target.value }))}
+              required
+            />
+            <input
+              type="text"
+              placeholder="Описание"
+              value={subjectForm.description}
+              onChange={(event) => setSubjectForm((prev) => ({ ...prev, description: event.target.value }))}
+            />
+            <button type="submit" className="btn btn-primary">
+              Създай предмет
+            </button>
+          </form>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Предмет</th>
+                  <th>Преподавател</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subjects.length === 0 ? (
+                  <tr>
+                    <td colSpan="3">Няма предмети.</td>
+                  </tr>
+                ) : (
+                  subjects.map((subject) => (
+                    <tr key={subject.id}>
+                      <td>{subject.id}</td>
+                      <td>{subject.name}</td>
+                      <td>{subject.teacherName}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Тестове</h2>
+          <form className="form-grid" onSubmit={handleCreateTest}>
+            <input
+              type="text"
+              placeholder="Заглавие"
+              value={testForm.title}
+              onChange={(event) => setTestForm((prev) => ({ ...prev, title: event.target.value }))}
+              required
+            />
+            <input
+              type="text"
+              placeholder="Описание"
+              value={testForm.description}
+              onChange={(event) => setTestForm((prev) => ({ ...prev, description: event.target.value }))}
+            />
+            <select
+              value={testForm.subjectId}
+              onChange={(event) => setTestForm((prev) => ({ ...prev, subjectId: event.target.value }))}
+              required
+            >
+              <option value="">Избери предмет</option>
+              {subjects.map((subject) => (
+                <option key={subject.id} value={subject.id}>
+                  {subject.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min="1"
+              max="300"
+              placeholder="Време (минути)"
+              value={testForm.timeLimitMinutes}
+              onChange={(event) =>
+                setTestForm((prev) => ({ ...prev, timeLimitMinutes: Number(event.target.value) || 30 }))
+              }
+            />
+            <button type="submit" className="btn btn-primary">
+              Създай тест
+            </button>
+          </form>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Тест</th>
+                  <th>Предмет</th>
+                  <th>Въпроси</th>
+                  <th>Избери</th>
+                  <th>Изтрий</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tests.length === 0 ? (
+                  <tr>
+                    <td colSpan="6">Няма тестове.</td>
+                  </tr>
+                ) : (
+                  tests.map((test) => (
+                    <tr key={test.id}>
+                      <td>{test.id}</td>
+                      <td>{test.title}</td>
+                      <td>{test.subjectName}</td>
+                      <td>{test.questionsCount}</td>
+                      <td>
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          onClick={() => setSelectedTestId(String(test.id))}
+                        >
+                          Отвори
+                        </button>
+                      </td>
+                      <td>
+                        <button className="btn btn-danger" type="button" onClick={() => handleDeleteTest(test.id)}>
+                          Изтрий
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Въпроси към тест</h2>
+          <div className="form-grid">
+            <select value={selectedTestId} onChange={(event) => setSelectedTestId(event.target.value)}>
+              <option value="">Избери тест</option>
+              {tests.map((test) => (
+                <option key={test.id} value={test.id}>
+                  #{test.id} {test.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedTestDetails ? (
+            <>
+              <p className="subtitle">
+                Тест: <strong>{selectedTestDetails.title}</strong> | Предмет: {selectedTestDetails.subjectName} | Време: {" "}
+                {selectedTestDetails.timeLimitMinutes} мин.
+              </p>
+
+              <form className="form-grid" onSubmit={handleAddManualQuestion}>
+                <input
+                  type="text"
+                  placeholder="Текст на въпрос"
+                  value={manualQuestionForm.questionText}
+                  onChange={(event) =>
+                    setManualQuestionForm((prev) => ({ ...prev, questionText: event.target.value }))
+                  }
+                  required
+                />
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={manualQuestionForm.points}
+                  onChange={(event) =>
+                    setManualQuestionForm((prev) => ({ ...prev, points: Number(event.target.value) || 1 }))
+                  }
+                />
+
+                {manualQuestionForm.options.map((option, index) => (
+                  <input
+                    key={index}
+                    type="text"
+                    placeholder={`Отговор ${index + 1}`}
+                    value={option}
+                    onChange={(event) => {
+                      const clone = [...manualQuestionForm.options];
+                      clone[index] = event.target.value;
+                      setManualQuestionForm((prev) => ({ ...prev, options: clone }));
+                    }}
+                  />
+                ))}
+
+                <select
+                  value={manualQuestionForm.correctIndex}
+                  onChange={(event) =>
+                    setManualQuestionForm((prev) => ({ ...prev, correctIndex: Number(event.target.value) }))
+                  }
+                >
+                  <option value={0}>Правилен: отговор 1</option>
+                  <option value={1}>Правилен: отговор 2</option>
+                  <option value={2}>Правилен: отговор 3</option>
+                  <option value={3}>Правилен: отговор 4</option>
+                </select>
+
+                <button type="submit" className="btn btn-primary">
+                  Добави ръчен въпрос
+                </button>
+              </form>
+
+              <form className="form-grid" onSubmit={handleGenerateAiQuestions}>
+                <input
+                  type="text"
+                  placeholder="AI тема (напр. Java колекции)"
+                  value={aiQuestionForm.topic}
+                  onChange={(event) => setAiQuestionForm((prev) => ({ ...prev, topic: event.target.value }))}
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Трудност"
+                  value={aiQuestionForm.difficulty}
+                  onChange={(event) =>
+                    setAiQuestionForm((prev) => ({ ...prev, difficulty: event.target.value }))
+                  }
+                />
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={aiQuestionForm.count}
+                  onChange={(event) => setAiQuestionForm((prev) => ({ ...prev, count: Number(event.target.value) || 1 }))}
+                />
+                <button type="submit" className="btn btn-primary">
+                  Генерирай AI въпроси
+                </button>
+              </form>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      <th>Въпрос</th>
+                      <th>Тип</th>
+                      <th>Точки</th>
+                      <th>Отговори</th>
+                      <th>Изтриване</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(selectedTestDetails.questions || []).length === 0 ? (
+                      <tr>
+                        <td colSpan="6">Няма добавени въпроси.</td>
+                      </tr>
+                    ) : (
+                      (selectedTestDetails.questions || []).map((question) => (
+                        <tr key={question.id}>
+                          <td>{question.positionIndex}</td>
+                          <td>{question.questionText}</td>
+                          <td>{question.sourceType}</td>
+                          <td>{question.points}</td>
+                          <td>
+                            <ol>
+                              {(question.options || []).map((option) => (
+                                <li key={option.id}>
+                                  {option.optionText} {option.correct ? "(правилен)" : ""}
+                                </li>
+                              ))}
+                            </ol>
+                          </td>
+                          <td>
+                            <button className="btn btn-danger" type="button" onClick={() => handleDeleteQuestion(question.id)}>
+                              Изтрий
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="subtitle">Избери тест, за да управляваш въпросите.</p>
+          )}
+        </section>
+
+        <section className="panel">
+          <h2>Групи</h2>
+          <form className="form-grid" onSubmit={handleCreateGroup}>
+            <input
+              type="text"
+              placeholder="Име на група"
+              value={groupForm.name}
+              onChange={(event) => setGroupForm((prev) => ({ ...prev, name: event.target.value }))}
+              required
+            />
+            <button type="submit" className="btn btn-primary">
+              Създай група
+            </button>
+          </form>
+
+          {(groups || []).map((group) => (
+            <div key={group.id} className="panel" style={{ marginTop: "0.8rem" }}>
+              <h2>
+                {group.groupName} (членове: {(group.members || []).length})
+              </h2>
+              <div className="row-controls">
+                <select
+                  value={memberByGroupId[group.id] || ""}
+                  onChange={(event) =>
+                    setMemberByGroupId((prev) => ({ ...prev, [group.id]: event.target.value }))
+                  }
+                >
+                  <option value="">Избери ученик</option>
+                  {students.map((student) => (
+                    <option key={student.id} value={student.id}>
+                      {student.name} ({student.username})
+                    </option>
+                  ))}
+                </select>
+                <button className="btn btn-primary" type="button" onClick={() => handleAddMember(group.id)}>
+                  Добави
+                </button>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Име</th>
+                      <th>Username</th>
+                      <th>Премахване</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(group.members || []).length === 0 ? (
+                      <tr>
+                        <td colSpan="4">Няма ученици в групата.</td>
+                      </tr>
+                    ) : (
+                      (group.members || []).map((member) => (
+                        <tr key={member.id}>
+                          <td>{member.id}</td>
+                          <td>{member.name}</td>
+                          <td>{member.username}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-danger"
+                              onClick={() => handleRemoveMember(group.id, member.id)}
+                            >
+                              Премахни
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <section className="panel">
+          <h2>Задаване на тест</h2>
+
+          <form className="form-grid" onSubmit={handleAssignToStudent}>
+            <select
+              value={assignStudentForm.testId}
+              onChange={(event) => setAssignStudentForm((prev) => ({ ...prev, testId: event.target.value }))}
+              required
+            >
+              <option value="">Тест</option>
+              {tests.map((test) => (
+                <option key={test.id} value={test.id}>
+                  {test.title}
+                </option>
+              ))}
+            </select>
+            <select
+              value={assignStudentForm.studentId}
+              onChange={(event) => setAssignStudentForm((prev) => ({ ...prev, studentId: event.target.value }))}
+              required
+            >
+              <option value="">Ученик</option>
+              {students.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.name} ({student.username})
+                </option>
+              ))}
+            </select>
+            <input
+              type="datetime-local"
+              value={assignStudentForm.dueAt}
+              onChange={(event) => setAssignStudentForm((prev) => ({ ...prev, dueAt: event.target.value }))}
+            />
+            <button type="submit" className="btn btn-primary">
+              Задай на ученик
+            </button>
+          </form>
+
+          <form className="form-grid" onSubmit={handleAssignToGroup}>
+            <select
+              value={assignGroupForm.testId}
+              onChange={(event) => setAssignGroupForm((prev) => ({ ...prev, testId: event.target.value }))}
+              required
+            >
+              <option value="">Тест</option>
+              {tests.map((test) => (
+                <option key={test.id} value={test.id}>
+                  {test.title}
+                </option>
+              ))}
+            </select>
+            <select
+              value={assignGroupForm.groupId}
+              onChange={(event) => setAssignGroupForm((prev) => ({ ...prev, groupId: event.target.value }))}
+              required
+            >
+              <option value="">Група</option>
+              {groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.groupName}
+                </option>
+              ))}
+            </select>
+            <input
+              type="datetime-local"
+              value={assignGroupForm.dueAt}
+              onChange={(event) => setAssignGroupForm((prev) => ({ ...prev, dueAt: event.target.value }))}
+            />
+            <button type="submit" className="btn btn-primary">
+              Задай на група
+            </button>
+          </form>
+        </section>
+
+        <section className="panel">
+          <h2>Зададени тестове</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Тест</th>
+                  <th>Ученик</th>
+                  <th>Група</th>
+                  <th>Статус</th>
+                  <th>Резултат</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teacherAssignments.length === 0 ? (
+                  <tr>
+                    <td colSpan="6">Няма задания.</td>
+                  </tr>
+                ) : (
+                  teacherAssignments.map((assignment) => (
+                    <tr key={assignment.id}>
+                      <td>{assignment.id}</td>
+                      <td>{assignment.testTitle}</td>
+                      <td>
+                        {assignment.studentName} ({assignment.studentUsername})
+                      </td>
+                      <td>{assignment.groupName || "-"}</td>
+                      <td>{assignment.latestStatus || "NOT_STARTED"}</td>
+                      <td>{assignment.latestScorePercent ?? "-"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Справки и статистика</h2>
+          {teacherOverview ? (
+            <div className="row-controls">
+              <span className="status-active">Тестове: {teacherOverview.totalTests}</span>
+              <span className="status-active">Задания: {teacherOverview.totalAssignments}</span>
+              <span className="status-active">Завършени опити: {teacherOverview.completedAttempts}</span>
+              <span className="status-active">Среден успех: {teacherOverview.averageScore}%</span>
+            </div>
+          ) : null}
+
+          <div className="row-controls" style={{ marginTop: "0.7rem" }}>
+            <select value={reportTestId} onChange={(event) => setReportTestId(event.target.value)}>
+              <option value="">Избери тест за детайлен отчет</option>
+              {tests.map((test) => (
+                <option key={test.id} value={test.id}>
+                  {test.title}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn btn-primary" onClick={handleLoadReportByTest}>
+              Зареди отчет
+            </button>
+          </div>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Ученик</th>
+                  <th>Статус</th>
+                  <th>Оценка %</th>
+                  <th>Точки</th>
+                  <th>Нарушения</th>
+                </tr>
+              </thead>
+              <tbody>
+                {testReportRows.length === 0 ? (
+                  <tr>
+                    <td colSpan="5">Няма данни за отчет.</td>
+                  </tr>
+                ) : (
+                  testReportRows.map((entry) => (
+                    <tr key={entry.attemptId}>
+                      <td>
+                        {entry.studentName} ({entry.studentUsername})
+                      </td>
+                      <td>{entry.status}</td>
+                      <td>{entry.scorePercent}</td>
+                      <td>
+                        {entry.earnedPoints}/{entry.totalPoints}
+                      </td>
+                      <td>{entry.violationsCount}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  function renderStudentPanel() {
+    return (
+      <>
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Student панел</h2>
+            <button type="button" className="btn btn-ghost" onClick={handleLogout}>
+              Изход
+            </button>
+          </div>
+          <p className="subtitle">
+            Решаваш тестовете по един въпрос на страница. При смяна на таб/минимизиране текущият въпрос се
+            маркира като грешен.
+          </p>
+        </section>
+
+        <section className="panel">
+          <h2>Моите зададени тестове</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Тест</th>
+                  <th>Предмет</th>
+                  <th>Статус</th>
+                  <th>Резултат</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentAssignments.length === 0 ? (
+                  <tr>
+                    <td colSpan="6">Няма зададени тестове.</td>
+                  </tr>
+                ) : (
+                  studentAssignments.map((assignment) => (
+                    <tr key={assignment.id}>
+                      <td>{assignment.id}</td>
+                      <td>{assignment.testTitle}</td>
+                      <td>{assignment.subjectName}</td>
+                      <td>{assignment.attemptStatus || "NOT_STARTED"}</td>
+                      <td>{assignment.scorePercent ?? "-"}</td>
+                      <td>
+                        <button className="btn btn-primary" type="button" onClick={() => handleStartAttempt(assignment.id)}>
+                          {assignment.attemptStatus === "COMPLETED" ? "Преглед" : "Старт"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {activeAttemptId ? (
+          <section className="panel">
+            <h2>Решаване на тест</h2>
+
+            {currentQuestionPayload?.completed ? (
+              <>
+                <p className="subtitle">Тестът е приключил.</p>
+                <button className="btn btn-primary" type="button" onClick={handleFinishAttemptAndRefresh}>
+                  Обнови резултат
+                </button>
+              </>
+            ) : currentQuestionPayload?.question ? (
+              <>
+                <p>
+                  Въпрос {currentQuestionPayload.currentPosition} / {currentQuestionPayload.totalQuestions}
+                </p>
+                <h3>{currentQuestionPayload.question.questionText}</h3>
+
+                <div className="row-controls" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                  {(currentQuestionPayload.options || []).map((option) => (
+                    <label key={option.id} className="panel" style={{ margin: 0, boxShadow: "none" }}>
+                      <input
+                        type="radio"
+                        name="answer"
+                        value={option.id}
+                        checked={String(selectedOptionId) === String(option.id)}
+                        onChange={(event) => setSelectedOptionId(event.target.value)}
+                      />{" "}
+                      {option.optionText}
+                    </label>
+                  ))}
+                </div>
+
+                <div className="row-controls" style={{ marginTop: "0.7rem" }}>
+                  <button className="btn btn-primary" type="button" onClick={handleSubmitStudentAnswer}>
+                    Потвърди и следващ
+                  </button>
+                  <span className="status-inactive">Нарушения: {currentQuestionPayload.violationsCount || 0}</span>
+                </div>
+              </>
+            ) : (
+              <p className="subtitle">Зареждане на текущ въпрос...</p>
+            )}
+          </section>
+        ) : null}
+
+        {attemptResult ? (
+          <section className="panel">
+            <h2>Резултат от теста</h2>
+            <div className="row-controls">
+              <span className="status-active">Резултат: {attemptResult.scorePercent}%</span>
+              <span className="status-active">
+                Точки: {attemptResult.earnedPoints}/{attemptResult.totalPoints}
+              </span>
+              <span className="status-inactive">Нарушения: {attemptResult.violationsCount}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Въпрос</th>
+                    <th>Избран отговор</th>
+                    <th>Точки</th>
+                    <th>Нарушение</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(attemptResult.answers || []).map((answer) => (
+                    <tr key={answer.id}>
+                      <td>{answer.questionText}</td>
+                      <td>{answer.selectedOptionText || "-"}</td>
+                      <td>{answer.earnedPoints}</td>
+                      <td>{answer.violationReason || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="panel">
+          <h2>История на резултати</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Тест</th>
+                  <th>Статус</th>
+                  <th>Резултат %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentResults.length === 0 ? (
+                  <tr>
+                    <td colSpan="3">Няма завършени тестове.</td>
+                  </tr>
+                ) : (
+                  studentResults.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{entry.testTitle}</td>
+                      <td>{entry.attemptStatus}</td>
+                      <td>{entry.scorePercent}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  return (
+    <main className="layout">
+      <header className="hero">
+        <p className="badge">Smart Test • React + Spring</p>
+        <h1>Интелигентна платформа за онлайн тестове</h1>
+        <p className="subtitle">
+          {isAuthenticated
+            ? `Влязъл потребител: ${currentUser?.username} (${role})`
+            : "Начална страница: регистрация и вход в системата."}
+        </p>
+      </header>
+
+      {loading ? (
+        <section className="panel">
+          <p className="subtitle">Зареждане...</p>
+        </section>
+      ) : null}
+
+      {!isAuthenticated ? renderAuth() : null}
+      {isAuthenticated && isAdmin ? renderAdminPanel() : null}
+      {isAuthenticated && isTeacher ? renderTeacherPanel() : null}
+      {isAuthenticated && isStudent ? renderStudentPanel() : null}
 
       {hasMessage ? (
         <section className="panel">

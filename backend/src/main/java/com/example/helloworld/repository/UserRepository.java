@@ -175,6 +175,15 @@ public class UserRepository {
         return count == null ? 0 : count;
     }
 
+    public int countUsersByRole(String role) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE role = ?",
+                Integer.class,
+                role
+        );
+        return count == null ? 0 : count;
+    }
+
     public User save(String username, String name, String email, String passwordHash, String role) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
