@@ -18,6 +18,7 @@
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/controller/AuthController.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/CreateUserRequest.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/RegisterRequest.java
+/Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/platform/UpdateQuestionRequest.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/service/AuthService.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/service/AccessControlService.java
 /Users/ivelindilqnovmihaylov/Desktop/Дипломна работа/Project/backend/src/main/java/com/example/helloworld/dto/LoginRequest.java

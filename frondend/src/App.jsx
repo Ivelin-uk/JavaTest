@@ -83,11 +83,18 @@ export default function App() {
   const [manualQuestionForm, setManualQuestionForm] = useState({
     questionText: "",
     points: 1,
-    options: ["", "", "", ""],
-    correctIndex: 0
+    timeLimitSeconds: 60,
+    options: ["", ""],
+    correctIndexes: [0]
   });
+  const [editingQuestionId, setEditingQuestionId] = useState(null);
 
-  const [aiQuestionForm, setAiQuestionForm] = useState({ topic: "", difficulty: "medium", count: 3 });
+  const [aiQuestionForm, setAiQuestionForm] = useState({
+    topic: "",
+    difficulty: "medium",
+    count: 3,
+    timeLimitSeconds: 60
+  });
 
   const [groupForm, setGroupForm] = useState({ name: "" });
   const [memberByGroupId, setMemberByGroupId] = useState({});
@@ -101,8 +108,10 @@ export default function App() {
   const [activeAttemptId, setActiveAttemptId] = useState(null);
   const [currentQuestionPayload, setCurrentQuestionPayload] = useState(null);
   const [attemptResult, setAttemptResult] = useState(null);
-  const [selectedOptionId, setSelectedOptionId] = useState("");
+  const [selectedOptionIds, setSelectedOptionIds] = useState([]);
+  const [questionRemainingSeconds, setQuestionRemainingSeconds] = useState(null);
   const violationLockRef = useRef(false);
+  const timeoutHandledQuestionIdRef = useRef(null);
 
   const isAuthenticated = Boolean(authToken);
   const hasMessage = Boolean(message.text);
@@ -343,6 +352,54 @@ export default function App() {
     };
   }, [isStudent, activeAttemptId, currentQuestionPayload, authToken]);
 
+  useEffect(() => {
+    if (!isStudent || !activeAttemptId || !currentQuestionPayload || currentQuestionPayload.completed) {
+      return;
+    }
+
+    const questionId = currentQuestionPayload?.question?.id;
+    if (!questionId || typeof questionRemainingSeconds !== "number") {
+      return;
+    }
+
+    if (questionRemainingSeconds <= 0) {
+      if (timeoutHandledQuestionIdRef.current === questionId) {
+        return;
+      }
+
+      timeoutHandledQuestionIdRef.current = questionId;
+      if (violationLockRef.current) {
+        return;
+      }
+
+      violationLockRef.current = true;
+      request(
+        `/student/attempts/${activeAttemptId}/violation`,
+        { method: "POST", body: JSON.stringify({ reason: "TIME_EXPIRED" }) },
+        authToken
+      )
+        .then((payload) => applyAttemptPayload(payload, "Времето за въпроса изтече."))
+        .catch((error) => pushMessage(error.message, "error"))
+        .finally(() => {
+          setTimeout(() => {
+            violationLockRef.current = false;
+          }, 400);
+        });
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setQuestionRemainingSeconds((prev) => {
+        if (typeof prev !== "number") return prev;
+        return Math.max(prev - 1, 0);
+      });
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isStudent, activeAttemptId, currentQuestionPayload, questionRemainingSeconds, authToken]);
+
   function handleLogout() {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     setAuthToken("");
@@ -361,13 +418,17 @@ export default function App() {
     setTestReportRows([]);
     setSelectedTestId("");
     setSelectedTestDetails(null);
+    setEditingQuestionId(null);
+    setManualQuestionForm({ questionText: "", points: 1, timeLimitSeconds: 60, options: ["", ""], correctIndexes: [0] });
 
     setStudentAssignments([]);
     setStudentResults([]);
     setActiveAttemptId(null);
     setCurrentQuestionPayload(null);
     setAttemptResult(null);
-    setSelectedOptionId("");
+    setSelectedOptionIds([]);
+    setQuestionRemainingSeconds(null);
+    timeoutHandledQuestionIdRef.current = null;
   }
 
   async function handleLogin(event) {
@@ -527,6 +588,77 @@ export default function App() {
     }
   }
 
+  function resetManualQuestionForm() {
+    setManualQuestionForm({
+      questionText: "",
+      points: 1,
+      timeLimitSeconds: 60,
+      options: ["", ""],
+      correctIndexes: [0]
+    });
+    setEditingQuestionId(null);
+  }
+
+  function handleManualOptionCountChange(nextCountRaw) {
+    const nextCount = Math.max(2, Math.min(8, Number(nextCountRaw) || 2));
+    setManualQuestionForm((prev) => {
+      const options = [...prev.options];
+      while (options.length < nextCount) {
+        options.push("");
+      }
+      const resizedOptions = options.slice(0, nextCount);
+      const validCorrectIndexes = (prev.correctIndexes || [])
+        .filter((index) => index >= 0 && index < nextCount);
+      return {
+        ...prev,
+        options: resizedOptions,
+        correctIndexes: validCorrectIndexes.length > 0 ? validCorrectIndexes : [0]
+      };
+    });
+  }
+
+  function handleToggleCorrectOption(index) {
+    setManualQuestionForm((prev) => {
+      const set = new Set(prev.correctIndexes || []);
+      if (set.has(index)) {
+        set.delete(index);
+      } else {
+        set.add(index);
+      }
+      const next = Array.from(set).sort((a, b) => a - b);
+      return {
+        ...prev,
+        correctIndexes: next.length > 0 ? next : [index]
+      };
+    });
+  }
+
+  function handleEditQuestion(question) {
+    const options = [...(question.options || [])].sort((a, b) => Number(a.positionIndex) - Number(b.positionIndex));
+    const correctIndexes = [];
+    const optionTexts = options.map((entry, index) => {
+      if (entry.correct) {
+        correctIndexes.push(index);
+      }
+      return entry.optionText || "";
+    });
+
+    setEditingQuestionId(question.id);
+    setManualQuestionForm({
+      questionText: question.questionText || "",
+      points: Number(question.points) || 1,
+      timeLimitSeconds: Number(question.timeLimitSeconds) || 60,
+      options: optionTexts.length >= 2 ? optionTexts : ["", ""],
+      correctIndexes: correctIndexes.length > 0 ? correctIndexes : [0]
+    });
+    pushMessage("Режим редакция на въпрос.", "success");
+  }
+
+  function cancelQuestionEdit() {
+    resetManualQuestionForm();
+    pushMessage("Редакцията е отказана.", "success");
+  }
+
   async function handleCreateSubject(event) {
     event.preventDefault();
     try {
@@ -579,7 +711,10 @@ export default function App() {
     }
 
     const options = manualQuestionForm.options
-      .map((text, index) => ({ text: text.trim(), correct: index === Number(manualQuestionForm.correctIndex) }))
+      .map((text, index) => ({
+        text: text.trim(),
+        correct: (manualQuestionForm.correctIndexes || []).includes(index)
+      }))
       .filter((item) => item.text.length > 0);
 
     if (options.length < 2) {
@@ -587,24 +722,34 @@ export default function App() {
       return;
     }
 
+    if (!options.some((entry) => entry.correct)) {
+      pushMessage("Маркирай поне един верен отговор.", "error");
+      return;
+    }
+
     try {
-      const response = await request(
-        `/teacher/tests/${selectedTestId}/questions/manual`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            questionText: manualQuestionForm.questionText,
-            points: Number(manualQuestionForm.points),
-            options
-          })
-        },
-        authToken
-      );
+      const payload = {
+        questionText: manualQuestionForm.questionText,
+        points: Number(manualQuestionForm.points),
+        timeLimitSeconds: Number(manualQuestionForm.timeLimitSeconds) || 60,
+        options
+      };
+      const response = editingQuestionId
+        ? await request(
+            `/teacher/questions/${editingQuestionId}`,
+            { method: "PUT", body: JSON.stringify(payload) },
+            authToken
+          )
+        : await request(
+            `/teacher/tests/${selectedTestId}/questions/manual`,
+            { method: "POST", body: JSON.stringify(payload) },
+            authToken
+          );
 
       setSelectedTestDetails(response.test);
-      setManualQuestionForm({ questionText: "", points: 1, options: ["", "", "", ""], correctIndex: 0 });
+      resetManualQuestionForm();
       await loadTeacherData();
-      pushMessage("Въпросът е добавен.", "success");
+      pushMessage(editingQuestionId ? "Въпросът е обновен." : "Въпросът е добавен.", "success");
     } catch (error) {
       pushMessage(error.message, "error");
     }
@@ -625,7 +770,8 @@ export default function App() {
           body: JSON.stringify({
             topic: aiQuestionForm.topic,
             difficulty: aiQuestionForm.difficulty,
-            count: Number(aiQuestionForm.count)
+            count: Number(aiQuestionForm.count),
+            timeLimitSeconds: Number(aiQuestionForm.timeLimitSeconds) || 60
           })
         },
         authToken
@@ -645,6 +791,9 @@ export default function App() {
       await request(`/teacher/questions/${questionId}`, { method: "DELETE" }, authToken);
       const refreshed = await request(`/teacher/tests/${selectedTestId}`, {}, authToken);
       setSelectedTestDetails(refreshed);
+      if (editingQuestionId === questionId) {
+        resetManualQuestionForm();
+      }
       await loadTeacherData();
       pushMessage("Въпросът е изтрит.", "success");
     } catch (error) {
@@ -755,7 +904,11 @@ export default function App() {
   function applyAttemptPayload(payload, successMessage = "") {
     if (payload?.completed === false) {
       setCurrentQuestionPayload(payload);
-      setSelectedOptionId("");
+      setSelectedOptionIds([]);
+      setQuestionRemainingSeconds(
+        typeof payload.remainingSeconds === "number" ? payload.remainingSeconds : null
+      );
+      timeoutHandledQuestionIdRef.current = null;
       if (successMessage) {
         pushMessage(successMessage, "success");
       }
@@ -765,7 +918,9 @@ export default function App() {
     if (payload?.completed === true && payload.result) {
       setCurrentQuestionPayload(payload);
       setAttemptResult(payload.result);
-      setSelectedOptionId("");
+      setSelectedOptionIds([]);
+      setQuestionRemainingSeconds(null);
+      timeoutHandledQuestionIdRef.current = null;
       loadStudentData();
       if (successMessage) {
         pushMessage(successMessage, "success");
@@ -776,7 +931,9 @@ export default function App() {
     if (payload?.answers) {
       setAttemptResult(payload);
       setCurrentQuestionPayload({ completed: true, result: payload });
-      setSelectedOptionId("");
+      setSelectedOptionIds([]);
+      setQuestionRemainingSeconds(null);
+      timeoutHandledQuestionIdRef.current = null;
       loadStudentData();
       if (successMessage) {
         pushMessage(successMessage, "success");
@@ -792,6 +949,9 @@ export default function App() {
       const started = await request(`/student/attempts/${assignmentId}/start`, { method: "POST" }, authToken);
       setActiveAttemptId(started.attemptId);
       setAttemptResult(null);
+      setSelectedOptionIds([]);
+      setQuestionRemainingSeconds(null);
+      timeoutHandledQuestionIdRef.current = null;
       applyAttemptPayload(started.current, "Тестът е стартиран.");
     } catch (error) {
       pushMessage(error.message, "error");
@@ -806,7 +966,7 @@ export default function App() {
         `/student/attempts/${activeAttemptId}/answer`,
         {
           method: "POST",
-          body: JSON.stringify({ optionId: selectedOptionId ? Number(selectedOptionId) : null })
+          body: JSON.stringify({ optionIds: selectedOptionIds.map((entry) => Number(entry)) })
         },
         authToken
       );
@@ -1378,41 +1538,63 @@ export default function App() {
                   type="number"
                   min="0.1"
                   step="0.1"
+                  placeholder="Точки"
                   value={manualQuestionForm.points}
                   onChange={(event) =>
                     setManualQuestionForm((prev) => ({ ...prev, points: Number(event.target.value) || 1 }))
                   }
                 />
+                <input
+                  type="number"
+                  min="5"
+                  max="3600"
+                  placeholder="Време за отговор (сек.)"
+                  value={manualQuestionForm.timeLimitSeconds}
+                  onChange={(event) =>
+                    setManualQuestionForm((prev) => ({
+                      ...prev,
+                      timeLimitSeconds: Number(event.target.value) || 60
+                    }))
+                  }
+                />
+                <input
+                  type="number"
+                  min="2"
+                  max="8"
+                  placeholder="Брой отговори"
+                  value={manualQuestionForm.options.length}
+                  onChange={(event) => handleManualOptionCountChange(event.target.value)}
+                />
 
                 {manualQuestionForm.options.map((option, index) => (
-                  <input
-                    key={index}
-                    type="text"
-                    placeholder={`Отговор ${index + 1}`}
-                    value={option}
-                    onChange={(event) => {
-                      const clone = [...manualQuestionForm.options];
-                      clone[index] = event.target.value;
-                      setManualQuestionForm((prev) => ({ ...prev, options: clone }));
-                    }}
-                  />
+                  <label key={index} className="row-controls">
+                    <input
+                      type="checkbox"
+                      checked={(manualQuestionForm.correctIndexes || []).includes(index)}
+                      onChange={() => handleToggleCorrectOption(index)}
+                    />
+                    <span>Верен</span>
+                    <input
+                      type="text"
+                      placeholder={`Отговор ${index + 1}`}
+                      value={option}
+                      onChange={(event) => {
+                        const clone = [...manualQuestionForm.options];
+                        clone[index] = event.target.value;
+                        setManualQuestionForm((prev) => ({ ...prev, options: clone }));
+                      }}
+                    />
+                  </label>
                 ))}
 
-                <select
-                  value={manualQuestionForm.correctIndex}
-                  onChange={(event) =>
-                    setManualQuestionForm((prev) => ({ ...prev, correctIndex: Number(event.target.value) }))
-                  }
-                >
-                  <option value={0}>Правилен: отговор 1</option>
-                  <option value={1}>Правилен: отговор 2</option>
-                  <option value={2}>Правилен: отговор 3</option>
-                  <option value={3}>Правилен: отговор 4</option>
-                </select>
-
                 <button type="submit" className="btn btn-primary">
-                  Добави ръчен въпрос
+                  {editingQuestionId ? "Запази редакция" : "Добави ръчен въпрос"}
                 </button>
+                {editingQuestionId ? (
+                  <button type="button" className="btn btn-ghost" onClick={cancelQuestionEdit}>
+                    Откажи редакция
+                  </button>
+                ) : null}
               </form>
 
               <form className="form-grid" onSubmit={handleGenerateAiQuestions}>
@@ -1438,6 +1620,16 @@ export default function App() {
                   value={aiQuestionForm.count}
                   onChange={(event) => setAiQuestionForm((prev) => ({ ...prev, count: Number(event.target.value) || 1 }))}
                 />
+                <input
+                  type="number"
+                  min="5"
+                  max="3600"
+                  placeholder="Време за AI въпрос (сек.)"
+                  value={aiQuestionForm.timeLimitSeconds}
+                  onChange={(event) =>
+                    setAiQuestionForm((prev) => ({ ...prev, timeLimitSeconds: Number(event.target.value) || 60 }))
+                  }
+                />
                 <button type="submit" className="btn btn-primary">
                   Генерирай AI въпроси
                 </button>
@@ -1451,14 +1643,16 @@ export default function App() {
                       <th>Въпрос</th>
                       <th>Тип</th>
                       <th>Точки</th>
+                      <th>Време (сек.)</th>
                       <th>Отговори</th>
+                      <th>Редакция</th>
                       <th>Изтриване</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(selectedTestDetails.questions || []).length === 0 ? (
                       <tr>
-                        <td colSpan="6">Няма добавени въпроси.</td>
+                        <td colSpan="8">Няма добавени въпроси.</td>
                       </tr>
                     ) : (
                       (selectedTestDetails.questions || []).map((question) => (
@@ -1467,6 +1661,7 @@ export default function App() {
                           <td>{question.questionText}</td>
                           <td>{question.sourceType}</td>
                           <td>{question.points}</td>
+                          <td>{question.timeLimitSeconds}</td>
                           <td>
                             <ol>
                               {(question.options || []).map((option) => (
@@ -1475,6 +1670,11 @@ export default function App() {
                                 </li>
                               ))}
                             </ol>
+                          </td>
+                          <td>
+                            <button className="btn btn-primary" type="button" onClick={() => handleEditQuestion(question)}>
+                              Редакция
+                            </button>
                           </td>
                           <td>
                             <button className="btn btn-danger" type="button" onClick={() => handleDeleteQuestion(question.id)}>
@@ -1821,16 +2021,31 @@ export default function App() {
                   Въпрос {currentQuestionPayload.currentPosition} / {currentQuestionPayload.totalQuestions}
                 </p>
                 <h3>{currentQuestionPayload.question.questionText}</h3>
+                <div className="row-controls">
+                  <span className="status-active">
+                    Време: {currentQuestionPayload.question.timeLimitSeconds} сек.
+                  </span>
+                  <span className="status-inactive">
+                    Остава: {typeof questionRemainingSeconds === "number" ? questionRemainingSeconds : "-"} сек.
+                  </span>
+                </div>
 
                 <div className="row-controls" style={{ flexDirection: "column", alignItems: "stretch" }}>
                   {(currentQuestionPayload.options || []).map((option) => (
                     <label key={option.id} className="panel" style={{ margin: 0, boxShadow: "none" }}>
                       <input
-                        type="radio"
-                        name="answer"
+                        type="checkbox"
                         value={option.id}
-                        checked={String(selectedOptionId) === String(option.id)}
-                        onChange={(event) => setSelectedOptionId(event.target.value)}
+                        checked={selectedOptionIds.includes(String(option.id))}
+                        onChange={(event) => {
+                          const value = String(event.target.value);
+                          setSelectedOptionIds((prev) => {
+                            if (prev.includes(value)) {
+                              return prev.filter((entry) => entry !== value);
+                            }
+                            return [...prev, value];
+                          });
+                        }}
                       />{" "}
                       {option.optionText}
                     </label>

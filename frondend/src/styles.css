@@ -154,7 +154,10 @@ tbody tr:hover {
   flex-wrap: wrap;
 }
 
-.row-controls input,
+.row-controls input[type="text"],
+.row-controls input[type="email"],
+.row-controls input[type="password"],
+.row-controls input[type="number"],
 .row-controls select {
   min-width: 180px;
   border: 1px solid #bfd5f5;

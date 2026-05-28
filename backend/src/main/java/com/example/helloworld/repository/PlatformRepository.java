@@ -202,18 +202,19 @@ public class PlatformRepository {
         return (maxPosition == null ? 0 : maxPosition) + 1;
     }
 
-    public Long createQuestion(Long testId, String questionText, String sourceType, BigDecimal points, int positionIndex) {
+    public Long createQuestion(Long testId, String questionText, String sourceType, BigDecimal points, int timeLimitSeconds, int positionIndex) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO questions (test_id, question_text, source_type, points, position_index) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO questions (test_id, question_text, source_type, points, time_limit_seconds, position_index) VALUES (?, ?, ?, ?, ?, ?)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, testId);
             ps.setString(2, questionText);
             ps.setString(3, sourceType);
             ps.setBigDecimal(4, points);
-            ps.setInt(5, positionIndex);
+            ps.setInt(5, timeLimitSeconds);
+            ps.setInt(6, positionIndex);
             return ps;
         }, keyHolder);
         Number key = keyHolder.getKey();
@@ -240,6 +241,7 @@ public class PlatformRepository {
                        q.question_text AS questionText,
                        q.source_type AS sourceType,
                        q.points,
+                       q.time_limit_seconds AS timeLimitSeconds,
                        q.position_index AS positionIndex
                 FROM questions q
                 WHERE q.test_id = ?
@@ -273,6 +275,50 @@ public class PlatformRepository {
                 """;
         int rows = jdbcTemplate.update(sql, questionId, admin ? 1 : 0, currentUserId);
         return rows > 0;
+    }
+
+    public Optional<Map<String, Object>> findQuestionById(Long questionId, Long currentUserId, boolean admin) {
+        String sql = """
+                SELECT q.id,
+                       q.test_id AS testId,
+                       q.question_text AS questionText,
+                       q.source_type AS sourceType,
+                       q.points,
+                       q.time_limit_seconds AS timeLimitSeconds,
+                       q.position_index AS positionIndex
+                FROM questions q
+                JOIN tests t ON t.id = q.test_id
+                WHERE q.id = ?
+                  AND (? = 1 OR t.teacher_id = ?)
+                """;
+        return findOne(sql, questionId, admin ? 1 : 0, currentUserId);
+    }
+
+    public boolean updateQuestion(Long questionId, String questionText, BigDecimal points, int timeLimitSeconds,
+                                  Long currentUserId, boolean admin) {
+        String sql = """
+                UPDATE questions q
+                JOIN tests t ON t.id = q.test_id
+                SET q.question_text = ?,
+                    q.points = ?,
+                    q.time_limit_seconds = ?
+                WHERE q.id = ?
+                  AND (? = 1 OR t.teacher_id = ?)
+                """;
+        int rows = jdbcTemplate.update(
+                sql,
+                questionText,
+                points,
+                timeLimitSeconds,
+                questionId,
+                admin ? 1 : 0,
+                currentUserId
+        );
+        return rows > 0;
+    }
+
+    public void deleteQuestionOptions(Long questionId) {
+        jdbcTemplate.update("DELETE FROM question_options WHERE question_id = ?", questionId);
     }
 
     public List<Map<String, Object>> findGroups(Long currentUserId, boolean admin) {
@@ -506,6 +552,7 @@ public class PlatformRepository {
                        student_id AS studentId,
                        status,
                        current_position AS currentPosition,
+                       current_question_started_at AS currentQuestionStartedAt,
                        start_time AS startTime,
                        end_time AS endTime,
                        earned_points AS earnedPoints,
@@ -523,7 +570,7 @@ public class PlatformRepository {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO test_attempts (assignment_id, student_id, status, current_position, total_points) VALUES (?, ?, 'IN_PROGRESS', 1, ?)",
+                    "INSERT INTO test_attempts (assignment_id, student_id, status, current_position, current_question_started_at, total_points) VALUES (?, ?, 'IN_PROGRESS', 1, CURRENT_TIMESTAMP, ?)",
                     Statement.RETURN_GENERATED_KEYS
             );
             ps.setLong(1, assignmentId);
@@ -545,6 +592,7 @@ public class PlatformRepository {
                        at.student_id AS studentId,
                        at.status,
                        at.current_position AS currentPosition,
+                       at.current_question_started_at AS currentQuestionStartedAt,
                        at.start_time AS startTime,
                        at.end_time AS endTime,
                        at.earned_points AS earnedPoints,
@@ -569,6 +617,7 @@ public class PlatformRepository {
                        question_text AS questionText,
                        source_type AS sourceType,
                        points,
+                       time_limit_seconds AS timeLimitSeconds,
                        position_index AS positionIndex
                 FROM questions
                 WHERE test_id = ?
@@ -614,21 +663,50 @@ public class PlatformRepository {
         return count != null && count > 0;
     }
 
-    public void insertAttemptAnswer(Long attemptId, Long questionId, Long selectedOptionId,
+    public Long insertAttemptAnswer(Long attemptId, Long questionId, Long selectedOptionId,
                                     boolean correct, BigDecimal earnedPoints, String violationReason) {
-        jdbcTemplate.update(
-                """
-                INSERT INTO attempt_answers
-                    (attempt_id, question_id, selected_option_id, is_correct, earned_points, violation_reason)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                attemptId,
-                questionId,
-                selectedOptionId,
-                correct,
-                earnedPoints,
-                violationReason
-        );
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(
+                    """
+                    INSERT INTO attempt_answers
+                        (attempt_id, question_id, selected_option_id, is_correct, earned_points, violation_reason)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    Statement.RETURN_GENERATED_KEYS
+            );
+            ps.setLong(1, attemptId);
+            ps.setLong(2, questionId);
+            if (selectedOptionId == null) {
+                ps.setNull(3, java.sql.Types.BIGINT);
+            } else {
+                ps.setLong(3, selectedOptionId);
+            }
+            ps.setBoolean(4, correct);
+            ps.setBigDecimal(5, earnedPoints);
+            ps.setString(6, violationReason);
+            return ps;
+        }, keyHolder);
+
+        Number key = keyHolder.getKey();
+        if (key == null) {
+            throw new IllegalStateException("Неуспешен запис на отговор.");
+        }
+        return key.longValue();
+    }
+
+    public void insertAttemptAnswerOptions(Long attemptAnswerId, List<Long> optionIds) {
+        if (optionIds == null || optionIds.isEmpty()) {
+            return;
+        }
+
+        for (Long optionId : optionIds) {
+            jdbcTemplate.update(
+                    "INSERT IGNORE INTO attempt_answer_options (attempt_answer_id, option_id) VALUES (?, ?)",
+                    attemptAnswerId,
+                    optionId
+            );
+        }
     }
 
     public void updateAttemptProgress(Long attemptId, int nextPosition, BigDecimal earnedDelta, int violationsDelta) {
@@ -636,6 +714,7 @@ public class PlatformRepository {
                 """
                 UPDATE test_attempts
                 SET current_position = ?,
+                    current_question_started_at = CURRENT_TIMESTAMP,
                     earned_points = earned_points + ?,
                     violations_count = violations_count + ?
                 WHERE id = ?
@@ -688,7 +767,10 @@ public class PlatformRepository {
                        a.question_id AS questionId,
                        q.question_text AS questionText,
                        a.selected_option_id AS selectedOptionId,
-                       o.option_text AS selectedOptionText,
+                       COALESCE(
+                           NULLIF(GROUP_CONCAT(DISTINCT so.option_text ORDER BY so.position_index SEPARATOR ', '), ''),
+                           o.option_text
+                       ) AS selectedOptionText,
                        a.is_correct AS correct,
                        a.earned_points AS earnedPoints,
                        a.violation_reason AS violationReason,
@@ -696,7 +778,20 @@ public class PlatformRepository {
                 FROM attempt_answers a
                 JOIN questions q ON q.id = a.question_id
                 LEFT JOIN question_options o ON o.id = a.selected_option_id
+                LEFT JOIN attempt_answer_options aao ON aao.attempt_answer_id = a.id
+                LEFT JOIN question_options so ON so.id = aao.option_id
                 WHERE a.attempt_id = ?
+                GROUP BY a.id,
+                         a.attempt_id,
+                         a.question_id,
+                         q.question_text,
+                         a.selected_option_id,
+                         o.option_text,
+                         a.is_correct,
+                         a.earned_points,
+                         a.violation_reason,
+                         a.answered_at,
+                         q.position_index
                 ORDER BY q.position_index
                 """;
         return jdbcTemplate.queryForList(sql, attemptId);

@@ -8,6 +8,7 @@ import com.example.helloworld.dto.platform.CreateManualQuestionRequest;
 import com.example.helloworld.dto.platform.CreateSubjectRequest;
 import com.example.helloworld.dto.platform.CreateTestRequest;
 import com.example.helloworld.dto.platform.GenerateAiQuestionsRequest;
+import com.example.helloworld.dto.platform.UpdateQuestionRequest;
 import com.example.helloworld.dto.platform.UpdateTestRequest;
 import com.example.helloworld.service.PlatformService;
 import jakarta.validation.Valid;
@@ -110,6 +111,13 @@ public class TeacherController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteQuestion(Authentication authentication, @PathVariable Long questionId) {
         platformService.deleteQuestion(authentication.getName(), questionId);
+    }
+
+    @PutMapping("/questions/{questionId}")
+    public Map<String, Object> updateQuestion(Authentication authentication,
+                                              @PathVariable Long questionId,
+                                              @Valid @RequestBody UpdateQuestionRequest request) {
+        return platformService.updateQuestion(authentication.getName(), questionId, request);
     }
 
     @GetMapping("/groups")

@@ -10,6 +10,7 @@ import com.example.helloworld.dto.platform.CreateTestRequest;
 import com.example.helloworld.dto.platform.GenerateAiQuestionsRequest;
 import com.example.helloworld.dto.platform.QuestionOptionInput;
 import com.example.helloworld.dto.platform.SubmitAnswerRequest;
+import com.example.helloworld.dto.platform.UpdateQuestionRequest;
 import com.example.helloworld.dto.platform.UpdateTestRequest;
 import com.example.helloworld.dto.platform.ViolationRequest;
 import com.example.helloworld.exception.UserNotFoundException;
@@ -18,15 +19,18 @@ import com.example.helloworld.repository.PlatformRepository;
 import com.example.helloworld.repository.UserRepository;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -201,6 +205,7 @@ public class PlatformService {
 
         String questionText = normalizeText(request.questionText(), 5, 5000, "Текстът на въпроса");
         BigDecimal points = BigDecimal.valueOf(request.points() == null ? 1.0 : request.points());
+        int timeLimitSeconds = normalizeQuestionTimeLimitSeconds(request.timeLimitSeconds());
         List<QuestionOptionInput> options = request.options() == null ? List.of() : request.options();
 
         if (options.size() < 2) {
@@ -213,7 +218,7 @@ public class PlatformService {
         }
 
         int position = platformRepository.nextQuestionPosition(testId);
-        Long questionId = platformRepository.createQuestion(testId, questionText, "MANUAL", points, position);
+        Long questionId = platformRepository.createQuestion(testId, questionText, "MANUAL", points, timeLimitSeconds, position);
 
         int optionPosition = 1;
         for (QuestionOptionInput option : options) {
@@ -224,6 +229,57 @@ public class PlatformService {
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("message", "Въпросът е добавен успешно.");
+        response.put("questionId", questionId);
+        response.put("test", getTestDetails(login, testId));
+        return response;
+    }
+
+    @Transactional
+    public Map<String, Object> updateQuestion(String login, Long questionId, UpdateQuestionRequest request) {
+        User current = requireUser(login);
+        ensureTeacherOrAdmin(current);
+
+        Map<String, Object> existingQuestion = platformRepository.findQuestionById(questionId, current.getId(), isAdmin(current))
+                .orElseThrow(() -> new IllegalArgumentException("Въпросът не е намерен или нямаш достъп."));
+
+        String questionText = normalizeText(request.questionText(), 5, 5000, "Текстът на въпроса");
+        BigDecimal points = BigDecimal.valueOf(request.points() == null ? 1.0 : request.points());
+        int timeLimitSeconds = normalizeQuestionTimeLimitSeconds(request.timeLimitSeconds());
+        List<QuestionOptionInput> options = request.options() == null ? List.of() : request.options();
+
+        if (options.size() < 2) {
+            throw new IllegalArgumentException("Трябва да има поне 2 отговора.");
+        }
+
+        long correctCount = options.stream().filter(option -> Boolean.TRUE.equals(option.correct())).count();
+        if (correctCount == 0) {
+            throw new IllegalArgumentException("Поне един отговор трябва да е правилен.");
+        }
+
+        boolean updated = platformRepository.updateQuestion(
+                questionId,
+                questionText,
+                points,
+                timeLimitSeconds,
+                current.getId(),
+                isAdmin(current)
+        );
+
+        if (!updated) {
+            throw new IllegalArgumentException("Въпросът не е намерен или нямаш достъп.");
+        }
+
+        platformRepository.deleteQuestionOptions(questionId);
+        int optionPosition = 1;
+        for (QuestionOptionInput option : options) {
+            String optionText = normalizeText(option.text(), 1, 500, "Текстът на отговор");
+            platformRepository.createQuestionOption(questionId, optionText, Boolean.TRUE.equals(option.correct()), optionPosition);
+            optionPosition++;
+        }
+
+        Long testId = longValue(existingQuestion.get("testId"));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("message", "Въпросът е обновен успешно.");
         response.put("questionId", questionId);
         response.put("test", getTestDetails(login, testId));
         return response;
@@ -241,6 +297,7 @@ public class PlatformService {
         String topic = normalizeText(request.topic(), 2, 180, "Темата");
         String difficulty = nullableTrim(request.difficulty(), 30);
         int count = request.count() == null ? 3 : Math.max(1, Math.min(20, request.count()));
+        int timeLimitSeconds = normalizeQuestionTimeLimitSeconds(request.timeLimitSeconds());
 
         List<AiQuestionGeneratorService.GeneratedQuestion> generatedQuestions =
                 aiQuestionGeneratorService.generate(topic, difficulty, count);
@@ -254,6 +311,7 @@ public class PlatformService {
                     generatedQuestion.questionText(),
                     "AI",
                     BigDecimal.valueOf(generatedQuestion.points()),
+                    timeLimitSeconds,
                     position
             );
 
@@ -493,54 +551,85 @@ public class PlatformService {
         User current = requireUser(login);
         ensureStudent(current);
 
-        Map<String, Object> attempt = platformRepository.findAttemptByIdForStudent(attemptId, current.getId())
-                .orElseThrow(() -> new IllegalArgumentException("Опитът не е намерен."));
+        int safetyCounter = 0;
+        while (safetyCounter < 100) {
+            safetyCounter++;
+            Map<String, Object> attempt = platformRepository.findAttemptByIdForStudent(attemptId, current.getId())
+                    .orElseThrow(() -> new IllegalArgumentException("Опитът не е намерен."));
 
-        String status = String.valueOf(attempt.get("status"));
-        if ("COMPLETED".equalsIgnoreCase(status)) {
-            Map<String, Object> completed = new LinkedHashMap<>();
-            completed.put("completed", true);
-            completed.put("result", buildAttemptResult(attemptId, current.getId()));
-            return completed;
+            String status = String.valueOf(attempt.get("status"));
+            if ("COMPLETED".equalsIgnoreCase(status)) {
+                Map<String, Object> completed = new LinkedHashMap<>();
+                completed.put("completed", true);
+                completed.put("result", buildAttemptResult(attemptId, current.getId()));
+                return completed;
+            }
+
+            Long testId = longValue(attempt.get("testId"));
+            int currentPosition = intValue(attempt.get("currentPosition"));
+            int totalQuestions = platformRepository.countQuestions(testId);
+
+            Optional<Map<String, Object>> currentQuestionOpt = platformRepository.findCurrentQuestion(testId, currentPosition);
+            if (currentQuestionOpt.isEmpty()) {
+                platformRepository.completeAttempt(attemptId);
+                Map<String, Object> completed = new LinkedHashMap<>();
+                completed.put("completed", true);
+                completed.put("result", buildAttemptResult(attemptId, current.getId()));
+                return completed;
+            }
+
+            Map<String, Object> question = new LinkedHashMap<>(currentQuestionOpt.get());
+            Long questionId = longValue(question.get("id"));
+            int remainingSeconds = calculateRemainingSeconds(attempt, question);
+
+            if (remainingSeconds <= 0 && !platformRepository.hasAnswerForQuestion(attemptId, questionId)) {
+                Long answerId = platformRepository.insertAttemptAnswer(
+                        attemptId,
+                        questionId,
+                        null,
+                        false,
+                        BigDecimal.ZERO,
+                        "TIME_EXPIRED"
+                );
+                platformRepository.insertAttemptAnswerOptions(answerId, List.of());
+                platformRepository.updateAttemptProgress(attemptId, currentPosition + 1, BigDecimal.ZERO, 1);
+
+                if (currentPosition >= totalQuestions) {
+                    platformRepository.completeAttempt(attemptId);
+                    Map<String, Object> completed = new LinkedHashMap<>();
+                    completed.put("completed", true);
+                    completed.put("result", buildAttemptResult(attemptId, current.getId()));
+                    return completed;
+                }
+                continue;
+            }
+
+            List<Map<String, Object>> options = platformRepository.findOptionsByQuestion(questionId);
+            List<Map<String, Object>> safeOptions = new ArrayList<>();
+            for (Map<String, Object> option : options) {
+                Map<String, Object> safe = new LinkedHashMap<>();
+                safe.put("id", option.get("id"));
+                safe.put("questionId", option.get("questionId"));
+                safe.put("optionText", option.get("optionText"));
+                safe.put("positionIndex", option.get("positionIndex"));
+                safeOptions.add(safe);
+            }
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("completed", false);
+            payload.put("attemptId", attemptId);
+            payload.put("testId", testId);
+            payload.put("testTitle", attempt.get("testTitle"));
+            payload.put("currentPosition", currentPosition);
+            payload.put("totalQuestions", totalQuestions);
+            payload.put("question", question);
+            payload.put("options", safeOptions);
+            payload.put("remainingSeconds", remainingSeconds);
+            payload.put("violationsCount", attempt.get("violationsCount"));
+            return payload;
         }
 
-        Long testId = longValue(attempt.get("testId"));
-        int currentPosition = intValue(attempt.get("currentPosition"));
-        int totalQuestions = platformRepository.countQuestions(testId);
-
-        Optional<Map<String, Object>> currentQuestionOpt = platformRepository.findCurrentQuestion(testId, currentPosition);
-        if (currentQuestionOpt.isEmpty()) {
-            platformRepository.completeAttempt(attemptId);
-            Map<String, Object> completed = new LinkedHashMap<>();
-            completed.put("completed", true);
-            completed.put("result", buildAttemptResult(attemptId, current.getId()));
-            return completed;
-        }
-
-        Map<String, Object> question = new LinkedHashMap<>(currentQuestionOpt.get());
-        List<Map<String, Object>> options = platformRepository.findOptionsByQuestion(longValue(question.get("id")));
-
-        List<Map<String, Object>> safeOptions = new ArrayList<>();
-        for (Map<String, Object> option : options) {
-            Map<String, Object> safe = new LinkedHashMap<>();
-            safe.put("id", option.get("id"));
-            safe.put("questionId", option.get("questionId"));
-            safe.put("optionText", option.get("optionText"));
-            safe.put("positionIndex", option.get("positionIndex"));
-            safeOptions.add(safe);
-        }
-
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("completed", false);
-        payload.put("attemptId", attemptId);
-        payload.put("testId", testId);
-        payload.put("testTitle", attempt.get("testTitle"));
-        payload.put("currentPosition", currentPosition);
-        payload.put("totalQuestions", totalQuestions);
-        payload.put("question", question);
-        payload.put("options", safeOptions);
-        payload.put("violationsCount", attempt.get("violationsCount"));
-        return payload;
+        throw new IllegalStateException("Неуспешно извличане на текущ въпрос.");
     }
 
     @Transactional
@@ -566,25 +655,58 @@ public class PlatformService {
             throw new IllegalArgumentException("На този въпрос вече е отговорено.");
         }
 
-        Long optionId = request.optionId();
-        boolean correct = false;
-        BigDecimal earned = BigDecimal.ZERO;
+        int remainingSeconds = calculateRemainingSeconds(attempt, question);
+        if (remainingSeconds <= 0) {
+            Long answerId = platformRepository.insertAttemptAnswer(
+                    attemptId,
+                    questionId,
+                    null,
+                    false,
+                    BigDecimal.ZERO,
+                    "TIME_EXPIRED"
+            );
+            platformRepository.insertAttemptAnswerOptions(answerId, List.of());
+            platformRepository.updateAttemptProgress(attemptId, currentPosition + 1, BigDecimal.ZERO, 1);
 
-        if (optionId != null) {
-            Map<String, Object> option = platformRepository.findOptionById(optionId)
-                    .orElseThrow(() -> new IllegalArgumentException("Невалиден отговор."));
-            Long optionQuestionId = longValue(option.get("questionId"));
-            if (!optionQuestionId.equals(questionId)) {
-                throw new IllegalArgumentException("Невалиден отговор за текущия въпрос.");
+            if (currentPosition >= platformRepository.countQuestions(testId)) {
+                platformRepository.completeAttempt(attemptId);
+                return buildAttemptResult(attemptId, current.getId());
             }
+            return getCurrentQuestion(login, attemptId);
+        }
 
-            correct = Boolean.TRUE.equals(option.get("correct"));
-            if (correct) {
-                earned = decimalValue(question.get("points"));
+        List<Map<String, Object>> questionOptions = platformRepository.findOptionsByQuestion(questionId);
+        Set<Long> allOptionIds = new LinkedHashSet<>();
+        Set<Long> correctOptionIds = new LinkedHashSet<>();
+        for (Map<String, Object> option : questionOptions) {
+            Long id = longValue(option.get("id"));
+            allOptionIds.add(id);
+            if (Boolean.TRUE.equals(option.get("correct"))) {
+                correctOptionIds.add(id);
             }
         }
 
-        platformRepository.insertAttemptAnswer(attemptId, questionId, optionId, correct, earned, null);
+        List<Long> selectedOptionIds = normalizeSelectedOptionIds(request);
+        for (Long selectedOptionId : selectedOptionIds) {
+            if (!allOptionIds.contains(selectedOptionId)) {
+                throw new IllegalArgumentException("Невалиден отговор за текущия въпрос.");
+            }
+        }
+
+        Set<Long> selectedSet = new LinkedHashSet<>(selectedOptionIds);
+        boolean correct = !selectedSet.isEmpty() && selectedSet.equals(correctOptionIds);
+        BigDecimal earned = correct ? decimalValue(question.get("points")) : BigDecimal.ZERO;
+        Long legacySelectedOptionId = selectedSet.size() == 1 ? selectedSet.iterator().next() : null;
+
+        Long answerId = platformRepository.insertAttemptAnswer(
+                attemptId,
+                questionId,
+                legacySelectedOptionId,
+                correct,
+                earned,
+                null
+        );
+        platformRepository.insertAttemptAnswerOptions(answerId, selectedOptionIds);
         platformRepository.updateAttemptProgress(attemptId, currentPosition + 1, earned, 0);
 
         if (currentPosition >= platformRepository.countQuestions(testId)) {
@@ -615,7 +737,15 @@ public class PlatformService {
         Long questionId = longValue(question.get("id"));
         if (!platformRepository.hasAnswerForQuestion(attemptId, questionId)) {
             String violationReason = normalizeViolationReason(request == null ? null : request.reason());
-            platformRepository.insertAttemptAnswer(attemptId, questionId, null, false, BigDecimal.ZERO, violationReason);
+            Long answerId = platformRepository.insertAttemptAnswer(
+                    attemptId,
+                    questionId,
+                    null,
+                    false,
+                    BigDecimal.ZERO,
+                    violationReason
+            );
+            platformRepository.insertAttemptAnswerOptions(answerId, List.of());
             platformRepository.updateAttemptProgress(attemptId, currentPosition + 1, BigDecimal.ZERO, 1);
         }
 
@@ -741,6 +871,14 @@ public class PlatformService {
         return normalized;
     }
 
+    private int normalizeQuestionTimeLimitSeconds(Integer value) {
+        int normalized = value == null ? 60 : value;
+        if (normalized < 5 || normalized > 3600) {
+            throw new IllegalArgumentException("Времето за въпрос трябва да е между 5 и 3600 секунди.");
+        }
+        return normalized;
+    }
+
     private String normalizeViolationReason(String reason) {
         if (!StringUtils.hasText(reason)) {
             return "TAB_SWITCH";
@@ -757,6 +895,48 @@ public class PlatformService {
             throw new IllegalArgumentException(fieldName + " е невалиден.");
         }
         return value;
+    }
+
+    private List<Long> normalizeSelectedOptionIds(SubmitAnswerRequest request) {
+        if (request == null) {
+            return List.of();
+        }
+
+        Set<Long> unique = new LinkedHashSet<>();
+        if (request.optionId() != null && request.optionId() > 0) {
+            unique.add(request.optionId());
+        }
+        if (request.optionIds() != null) {
+            for (Long optionId : request.optionIds()) {
+                if (optionId != null && optionId > 0) {
+                    unique.add(optionId);
+                }
+            }
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private int calculateRemainingSeconds(Map<String, Object> attempt, Map<String, Object> question) {
+        int timeLimitSeconds = intValue(question.get("timeLimitSeconds"));
+        if (timeLimitSeconds <= 0) {
+            return 0;
+        }
+
+        Timestamp startedAt = timestampValue(attempt.get("currentQuestionStartedAt"));
+        if (startedAt == null) {
+            return timeLimitSeconds;
+        }
+
+        long elapsed = Duration.between(startedAt.toInstant(), Instant.now()).getSeconds();
+        int remaining = timeLimitSeconds - (int) elapsed;
+        return Math.max(0, remaining);
+    }
+
+    private Timestamp timestampValue(Object value) {
+        if (value instanceof Timestamp timestamp) {
+            return timestamp;
+        }
+        return null;
     }
 
     private Long longValue(Object value) {

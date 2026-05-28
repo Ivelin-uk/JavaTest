@@ -15,6 +15,10 @@ public record GenerateAiQuestionsRequest(
 
         @Min(value = 1, message = "Броят въпроси трябва да е поне 1.")
         @Max(value = 20, message = "Броят въпроси може да е максимум 20.")
-        Integer count
+        Integer count,
+
+        @Min(value = 5, message = "Времето за отговор трябва да е поне 5 секунди.")
+        @Max(value = 3600, message = "Времето за отговор може да е максимум 3600 секунди.")
+        Integer timeLimitSeconds
 ) {
 }

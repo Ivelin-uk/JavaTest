@@ -53,6 +53,9 @@ public class DatabaseSchemaInitializer implements ApplicationRunner {
         ensureUserActiveColumn();
         createRolesAndAccessTables();
         createLearningTables();
+        ensureQuestionTimeLimitColumn();
+        ensureAttemptCurrentQuestionStartedAtColumn();
+        createAttemptAnswerOptionsTable();
         seedNomenclatures();
         jdbcTemplate.update("UPDATE users SET is_active = 1 WHERE is_active IS NULL");
     }
@@ -180,6 +183,7 @@ public class DatabaseSchemaInitializer implements ApplicationRunner {
                 question_text TEXT NOT NULL,
                 source_type VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
                 points DECIMAL(8,2) NOT NULL DEFAULT 1.00,
+                time_limit_seconds INT NOT NULL DEFAULT 60,
                 position_index INT NOT NULL,
                 PRIMARY KEY (id),
                 UNIQUE KEY uk_questions_test_position (test_id, position_index),
@@ -267,6 +271,7 @@ public class DatabaseSchemaInitializer implements ApplicationRunner {
                 student_id BIGINT NOT NULL,
                 status VARCHAR(20) NOT NULL DEFAULT 'IN_PROGRESS',
                 current_position INT NOT NULL DEFAULT 1,
+                current_question_started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 end_time TIMESTAMP NULL,
                 earned_points DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -304,6 +309,66 @@ public class DatabaseSchemaInitializer implements ApplicationRunner {
                     FOREIGN KEY (selected_option_id) REFERENCES question_options(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
+        );
+
+        createAttemptAnswerOptionsTable();
+    }
+
+    private void ensureQuestionTimeLimitColumn() {
+        Integer columnExists = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'questions'
+                  AND column_name = 'time_limit_seconds'
+                """,
+                Integer.class
+        );
+
+        if (columnExists == null || columnExists == 0) {
+            jdbcTemplate.execute(
+                    "ALTER TABLE questions ADD COLUMN time_limit_seconds INT NOT NULL DEFAULT 60 AFTER points"
+            );
+        }
+
+        jdbcTemplate.update("UPDATE questions SET time_limit_seconds = 60 WHERE time_limit_seconds IS NULL OR time_limit_seconds < 5");
+    }
+
+    private void ensureAttemptCurrentQuestionStartedAtColumn() {
+        Integer columnExists = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'test_attempts'
+                  AND column_name = 'current_question_started_at'
+                """,
+                Integer.class
+        );
+
+        if (columnExists == null || columnExists == 0) {
+            jdbcTemplate.execute(
+                    "ALTER TABLE test_attempts ADD COLUMN current_question_started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER current_position"
+            );
+        }
+
+        jdbcTemplate.update("UPDATE test_attempts SET current_question_started_at = CURRENT_TIMESTAMP WHERE current_question_started_at IS NULL");
+    }
+
+    private void createAttemptAnswerOptionsTable() {
+        jdbcTemplate.execute(
+                """
+                CREATE TABLE IF NOT EXISTS attempt_answer_options (
+                    attempt_answer_id BIGINT NOT NULL,
+                    option_id BIGINT NOT NULL,
+                    PRIMARY KEY (attempt_answer_id, option_id),
+                    CONSTRAINT fk_attempt_answer_options_answer
+                        FOREIGN KEY (attempt_answer_id) REFERENCES attempt_answers(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_attempt_answer_options_option
+                        FOREIGN KEY (option_id) REFERENCES question_options(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
         );
     }
 
